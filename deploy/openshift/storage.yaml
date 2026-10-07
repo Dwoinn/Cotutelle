@@ -1,0 +1,14 @@
+# Base SQLite et listes de blocage. Volume bloc en accès exclusif : SQLite ne
+# supporte ni le partage entre pods ni les systèmes de fichiers en réseau.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cotutelle-data
+  labels:
+    app.kubernetes.io/name: cotutelle-server
+    app.kubernetes.io/part-of: cotutelle
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi

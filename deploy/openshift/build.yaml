@@ -1,0 +1,42 @@
+# Construction de l'image dans le cluster, à partir du dépôt public.
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: cotutelle-server
+  labels:
+    app.kubernetes.io/name: cotutelle-server
+    app.kubernetes.io/part-of: cotutelle
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: cotutelle-server
+  labels:
+    app.kubernetes.io/name: cotutelle-server
+    app.kubernetes.io/part-of: cotutelle
+spec:
+  runPolicy: Serial
+  successfulBuildsHistoryLimit: 2
+  failedBuildsHistoryLimit: 2
+  source:
+    type: Git
+    git:
+      uri: https://github.com/Dwoinn/cotutelle.git
+      ref: main
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: docker/Dockerfile.server
+  output:
+    to:
+      kind: ImageStreamTag
+      name: cotutelle-server:latest
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      memory: 6Gi

@@ -90,6 +90,7 @@ crates/agent    service installé sur l'appareil protégé
 web/            interface SvelteKit + Tailwind (parents et enfant)
 packaging/      unité systemd, lanceur et scripts du paquet Debian
 docker/         image du serveur et compose d'exemple
+deploy/         manifestes OpenShift
 scripts/        seed de développement, construction du .deb
 ```
 

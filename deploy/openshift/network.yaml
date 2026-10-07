@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cotutelle-server
+  labels:
+    app.kubernetes.io/name: cotutelle-server
+    app.kubernetes.io/part-of: cotutelle
+spec:
+  selector:
+    app.kubernetes.io/name: cotutelle-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Interface et API en HTTPS. Les agents s'y connectent en WebSocket : le délai
+# d'inactivité du routeur est relevé pour ne pas couper leur connexion.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: cotutelle
+  labels:
+    app.kubernetes.io/name: cotutelle-server
+    app.kubernetes.io/part-of: cotutelle
+  annotations:
+    haproxy.router.openshift.io/timeout: 5m
+    haproxy.router.openshift.io/timeout-tunnel: 1h
+spec:
+  to:
+    kind: Service
+    name: cotutelle-server
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

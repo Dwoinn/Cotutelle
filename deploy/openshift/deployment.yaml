@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cotutelle-server
+  labels:
+    app.kubernetes.io/name: cotutelle-server
+    app.kubernetes.io/part-of: cotutelle
+  annotations:
+    # Redéploie automatiquement quand une nouvelle image est construite.
+    image.openshift.io/triggers: >-
+      [{"from":{"kind":"ImageStreamTag","name":"cotutelle-server:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"server\")].image"}]
+spec:
+  # Un seul réplica, remplacé et non doublé : la base SQLite n'a qu'un écrivain.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cotutelle-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cotutelle-server
+        app.kubernetes.io/part-of: cotutelle
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          image: cotutelle-server:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: TZ
+              value: Europe/Paris
+            - name: RUST_LOG
+              value: info
+            # La route termine le TLS : les cookies ne voyagent qu'en HTTPS.
+            - name: COTUTELLE_SECURE_COOKIES
+              value: "true"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              # La conversion quotidienne des listes UT1 est le pic de mémoire.
+              memory: 768Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: cotutelle-data

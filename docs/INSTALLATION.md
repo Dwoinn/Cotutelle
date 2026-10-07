@@ -21,6 +21,27 @@ téléchargent seules au premier démarrage, en une à deux minutes.
 
 Les données (base SQLite, listes) vivent dans le volume `cotutelle-data`.
 
+### Sur OpenShift
+
+Les manifestes de `deploy/openshift` créent le namespace `cotutelle`, font
+construire l'image par le cluster depuis le dépôt, et déploient le serveur
+avec son volume et une route HTTPS :
+
+```bash
+oc apply -k deploy/openshift
+oc -n cotutelle start-build cotutelle-server --follow
+oc -n cotutelle get route cotutelle
+```
+
+SQLite est intégré au binaire : il n'y a pas de base à déployer à côté,
+seulement un volume bloc de 2 Gio. Le déploiement garde un seul réplica en
+stratégie `Recreate`, car la base n'accepte qu'un écrivain. Une nouvelle
+construction redéploie automatiquement.
+
+Le DNS du réseau local n'est pas exposé dans ce mode : derrière le réseau du
+cluster, le serveur ne verrait pas l'adresse des appareils. Les ordinateurs
+avec agent ne sont pas concernés, ils filtrent en local.
+
 ### Sans Docker
 
 ```bash
