@@ -38,7 +38,4 @@ typed_id!(ChildId, "Un enfant, porteur d'une politique.");
 typed_id!(DeviceId, "Un appareil, avec ou sans agent.");
 typed_id!(PolicyId, "Une politique : filtres, horaires, quota.");
 typed_id!(GrantId, "Une exception temporaire accordée par un parent.");
-typed_id!(
-    RequestId,
-    "Une demande émise depuis l'appareil d'un enfant."
-);
+typed_id!(RequestId, "Une demande émise depuis l'appareil d'un enfant.");

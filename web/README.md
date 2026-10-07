@@ -1,15 +1,23 @@
 # Interface web Cotutelle
 
-SvelteKit + Tailwind, servie en statique par `cotutelle-server`.
-
-Non initialisée en phase 0. Pour démarrer (phase 1) :
+SvelteKit 3 (Svelte 5, mode runes) et Tailwind 4, compilée en application
+monopage statique et servie par `cotutelle-server`.
 
 ```bash
-cd web
-pnpm dlx sv create . --template minimal --types ts
-pnpm dlx sv add tailwindcss
-pnpm install && pnpm dev
+pnpm install
+COTUTELLE_API=http://127.0.0.1:8087 pnpm dev   # rechargement à chaud, API relayée
+pnpm check                                      # typage
+pnpm build                                      # sortie dans build/
 ```
 
-Deux espaces : `/` parents (authentifié), `/moi` enfant (depuis l'appareil,
-sans mot de passe), plus la page de blocage `/bloque`.
+| Route | Rôle |
+|-------|------|
+| `/` | Tableau de bord : enfants, demandes, alertes, actions rapides |
+| `/enfants/[id]` | Activité, horaires et temps, filtres, profil |
+| `/appareils` | Ordinateurs avec agent, appareils sans agent |
+| `/reglages` | Listes, notifications, réseau, comptes parents |
+| `/moi` | Espace enfant ; `?apercu=<id>` pour l'aperçu parent |
+| `/connexion`, `/installation` | Accès parents |
+
+Les imports internes passent par `#lib/…` avec l'extension du fichier.
+Les types de `src/lib/types.ts` reflètent les structures de `cotutelle-common`.

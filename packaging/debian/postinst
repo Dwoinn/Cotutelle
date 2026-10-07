@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+if [ "$1" = "configure" ]; then
+    install -d -m 0700 /var/lib/cotutelle
+    systemctl daemon-reload || true
+    if [ -f /var/lib/cotutelle/agent.json ]; then
+        # Mise à jour d'un appareil déjà rattaché : on relance l'agent.
+        systemctl enable cotutelle-agent.service >/dev/null 2>&1 || true
+        systemctl restart cotutelle-agent.service || true
+    else
+        cat <<'MSG'
+
+Cotutelle est installé. Pour rattacher cet ordinateur à votre serveur :
+
+  1. Dans l'interface parents : Appareils > Ajouter un ordinateur.
+  2. Ici, avec le code affiché :
+       sudo cotutelle-agent enroll --server http://ADRESSE:8080 --code XXXX-XXXX
+       sudo systemctl enable --now cotutelle-agent
+
+MSG
+    fi
+fi

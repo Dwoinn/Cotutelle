@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Mon temps d'écran
+GenericName=Cotutelle
+Comment=Voir mon temps restant et faire une demande à mes parents
+Exec=xdg-open http://127.0.0.1:7465/
+Icon=cotutelle
+Terminal=false
+Categories=Utility;
+Keywords=temps;écran;parents;cotutelle;

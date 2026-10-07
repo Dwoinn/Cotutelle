@@ -1,19 +1,29 @@
+# Serveur Cotutelle.
+#
+#   docker compose -f docker/compose.yaml up -d
+#
+# puis ouvrez http://<adresse de cette machine>:8080 pour créer le compte parent.
+
 services:
   cotutelle:
     build:
       context: ..
       dockerfile: docker/Dockerfile.server
-    image: cotutelle/server:dev
+    image: ghcr.io/dwoinn/cotutelle-server:latest
     container_name: cotutelle
     restart: unless-stopped
     ports:
       - "8080:8080"
-      # Phase 1 : DNS pour tout le réseau local (D5).
-      # - "53:53/udp"
-      # - "53:53/tcp"
+      # DNS du réseau local, pour les appareils sans agent (télévision, console…).
+      # Remplacez 192.168.1.10 par l'adresse de cette machine sur votre réseau :
+      # sous Ubuntu, publier sur toutes les interfaces entre en conflit avec
+      # systemd-resolved, qui occupe déjà 127.0.0.53:53.
+      # - "192.168.1.10:53:5353/udp"
+      # - "192.168.1.10:53:5353/tcp"
     volumes:
       - cotutelle-data:/data
     environment:
+      TZ: Europe/Paris
       RUST_LOG: info
 
 volumes:

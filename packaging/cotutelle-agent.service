@@ -1,0 +1,26 @@
+[Unit]
+Description=Agent Cotutelle (contrôle parental)
+Documentation=https://github.com/Dwoinn/cotutelle
+After=network-online.target systemd-resolved.service nftables.service
+Wants=network-online.target
+# Ne démarre qu'une fois l'appareil rattaché à un serveur.
+ConditionPathExists=/var/lib/cotutelle/agent.json
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cotutelle-agent run
+# Rend au système sa configuration DNS si le service est arrêté par un administrateur.
+ExecStopPost=/usr/bin/cotutelle-agent release
+Restart=always
+RestartSec=2
+# L'agent doit rester root : nftables, systemd-resolved, logind.
+User=root
+PrivateTmp=true
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

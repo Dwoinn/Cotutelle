@@ -1,0 +1,130 @@
+//! État vivant de l'agent, partagé entre le résolveur DNS, la boucle de
+//! surveillance des sessions et la synchronisation avec le serveur.
+
+use crate::platform::Platform;
+use crate::store::{Identity, Paths, UsageStore};
+use chrono::{DateTime, Datelike, Local, NaiveDate};
+use cotutelle_common::protocol::{AccountState, AgentMessage, DeviceState};
+use cotutelle_common::stats::DnsStats;
+use cotutelle_common::{
+    AccessStatus, Blocklists, FilterContext, Usage, Verdict, evaluate, evaluate_access,
+};
+use cotutelle_dns::{Decision, Handler};
+use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, RwLock};
+
+const DEFAULT_UPSTREAMS: &[&str] = &["9.9.9.9:53", "149.112.112.112:53"];
+
+pub struct Runtime {
+    pub identity: Identity,
+    pub paths: Paths,
+    pub platform: Box<dyn Platform>,
+    /// Mode d'essai : journalise les verrouillages et notifications sans les exécuter.
+    pub dry_run: bool,
+    pub http: reqwest::Client,
+    pub state: RwLock<Option<DeviceState>>,
+    pub blocklists: RwLock<Blocklists>,
+    /// (catégorie, somme de contrôle) des listes actuellement en mémoire.
+    pub loaded_lists: Mutex<Vec<(String, String)>>,
+    pub usage: Mutex<UsageStore>,
+    /// Compte actuellement devant l'écran, s'il y en a un.
+    pub foreground: RwLock<Option<String>>,
+    /// Compteurs DNS par compte, vidés vers le serveur chaque minute.
+    pub stats: Mutex<DnsStats<String>>,
+    /// Messages en attente d'envoi au serveur.
+    pub outbox: Mutex<Vec<AgentMessage>>,
+    pub connected: AtomicBool,
+}
+
+impl Runtime {
+    pub fn account(&self, os_account: &str) -> Option<AccountState> {
+        let state = self.state.read().expect("verrou état");
+        state.as_ref()?.accounts.iter().find(|a| a.os_account == os_account).cloned()
+    }
+
+    pub fn managed_accounts(&self) -> Vec<AccountState> {
+        self.state
+            .read()
+            .expect("verrou état")
+            .as_ref()
+            .map(|s| s.accounts.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn foreground(&self) -> Option<String> {
+        self.foreground.read().expect("verrou premier plan").clone()
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::Relaxed)
+    }
+
+    pub fn queue(&self, message: AgentMessage) {
+        self.outbox.lock().expect("verrou file").push(message);
+    }
+
+    /// Temps consommé par un compte, tous appareils confondus.
+    pub fn total_usage(&self, account: &AccountState, today: NaiveDate) -> Usage {
+        let usage = self.usage.lock().expect("verrou temps");
+        Usage {
+            today_minutes: usage.seconds(&account.os_account, today) / 60
+                + account.usage_elsewhere.today_minutes,
+            week_minutes: usage.week_seconds(&account.os_account, today) / 60
+                + account.usage_elsewhere.week_minutes,
+        }
+    }
+
+    /// État d'accès d'un compte géré à l'instant `now`.
+    pub fn access(&self, account: &AccountState, now: DateTime<Local>) -> AccessStatus {
+        let usage = self.total_usage(account, now.date_naive());
+        evaluate_access(
+            &account.policy,
+            &account.grants,
+            now.to_utc(),
+            now.weekday(),
+            now.time(),
+            usage,
+        )
+    }
+}
+
+impl Handler for Runtime {
+    fn decide(&self, _client: IpAddr, name: &str) -> Decision {
+        // Personne devant l'écran, ou un compte non géré (un parent) : pas de filtrage.
+        let Some(os_account) = self.foreground() else { return Decision::Forward };
+        let Some(account) = self.account(&os_account) else { return Decision::Forward };
+
+        let blocklists = self.blocklists.read().expect("verrou listes");
+        let verdict = evaluate(
+            name,
+            &FilterContext {
+                policy: &account.policy.filter,
+                grants: &account.grants,
+                blocklists: &blocklists,
+                now: chrono::Utc::now(),
+                // Hors horaires, c'est le verrouillage de session qui s'applique (D4).
+                access_open: true,
+            },
+        );
+        let blocked = match &verdict {
+            Verdict::Block(reason) => Some(reason),
+            _ => None,
+        };
+        self.stats.lock().expect("verrou stats").record(&os_account, name, blocked);
+        verdict.into()
+    }
+
+    fn upstreams(&self) -> Vec<SocketAddr> {
+        let state = self.state.read().expect("verrou état");
+        let configured: Vec<SocketAddr> = state
+            .as_ref()
+            .map(|s| s.upstream_dns.iter().filter_map(|u| u.parse().ok()).collect())
+            .unwrap_or_default();
+        if configured.is_empty() {
+            DEFAULT_UPSTREAMS.iter().filter_map(|u| u.parse().ok()).collect()
+        } else {
+            configured
+        }
+    }
+}

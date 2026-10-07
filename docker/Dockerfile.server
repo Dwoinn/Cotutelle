@@ -1,16 +1,35 @@
 # syntax=docker/dockerfile:1
+
+# Interface web (SvelteKit, sortie statique)
+FROM node:22-bookworm-slim AS web
+WORKDIR /src/web
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.npmrc ./
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
+COPY web/ ./
+RUN pnpm run build
+
+# Serveur
 FROM rust:1-bookworm AS build
 WORKDIR /src
-COPY . .
+COPY Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml ./
+COPY crates ./crates
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release -p cotutelle-server \
-    && cp target/release/cotutelle-server /cotutelle-server
+    && cp target/release/cotutelle-server /cotutelle-server \
+    && mkdir /data
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=build /cotutelle-server /usr/local/bin/cotutelle-server
+COPY --from=web /src/web/build /usr/share/cotutelle/web
+COPY --from=build --chown=nonroot:nonroot /data /data
 VOLUME /data
-ENV COTUTELLE_DATABASE=/data/cotutelle.db
-# 8080 : API + web. 53 : DNS réseau local (phase 1, nécessite NET_BIND_SERVICE).
-EXPOSE 8080 53/udp 53/tcp
+ENV COTUTELLE_DATA_DIR=/data \
+    COTUTELLE_WEB_DIR=/usr/share/cotutelle/web \
+    COTUTELLE_HTTP_ADDR=0.0.0.0:8080 \
+    COTUTELLE_DNS_ADDR=0.0.0.0:5353
+# 8080 : interface et API. 5353 : DNS du réseau local, à publier sur le port 53 de l'hôte.
+EXPOSE 8080 5353/udp 5353/tcp
 ENTRYPOINT ["/usr/local/bin/cotutelle-server"]

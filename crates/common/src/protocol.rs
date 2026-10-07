@@ -1,65 +1,77 @@
-//! Messages échangés entre l'agent et le serveur (WebSocket, repli HTTP).
-//! Sérialisés en JSON. Voir §7 du document de cadrage.
+//! Messages échangés entre l'agent et le serveur (WebSocket, JSON).
+//! Voir §7 du document de cadrage.
+//!
+//! Le serveur envoie toujours un état complet ([`DeviceState`]) : l'agent
+//! n'a jamais à fusionner des deltas, et sa copie sur disque est directement
+//! la dernière politique connue (D3).
 
-use crate::{ChildId, DeviceId, Policy, TemporaryGrant};
-use chrono::{DateTime, Utc};
+use crate::{BlockReason, ChildId, DeviceId, Policy, TemporaryGrant, Usage};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Politique effective pour un compte de session d'un appareil.
+/// Politique d'un compte de session géré sur l'appareil.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionPolicy {
-    /// Nom du compte OS (ex. `louis`). `None` = politique par défaut de l'appareil.
-    pub os_account: Option<String>,
-    pub child: Option<ChildId>,
+pub struct AccountState {
+    /// Nom du compte OS (ex. `louis`).
+    pub os_account: String,
+    pub child: ChildId,
+    pub child_name: String,
     pub policy: Policy,
     pub grants: Vec<TemporaryGrant>,
+    /// Temps consommé par cet enfant sur ses *autres* appareils.
+    pub usage_elsewhere: Usage,
+}
+
+/// Référence d'une liste de blocage que l'agent doit détenir.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlocklistRef {
+    pub category: String,
+    /// Somme SHA-256 hexadécimale du fichier binaire.
+    pub checksum: String,
+    pub entries: u64,
+}
+
+/// État complet destiné à un appareil.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceState {
+    pub device: DeviceId,
+    pub issued_at: DateTime<Utc>,
+    /// Comptes gérés. Un compte absent de cette liste n'est pas filtré.
+    pub accounts: Vec<AccountState>,
+    pub blocklists: Vec<BlocklistRef>,
+    /// Résolveurs amont, sous la forme `ip:port`.
+    pub upstream_dns: Vec<String>,
 }
 
 /// Envoyé par le serveur à l'agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
-    /// Politique complète, remplace la copie locale.
-    PolicyUpdate {
-        device: DeviceId,
-        issued_at: DateTime<Utc>,
-        sessions: Vec<SessionPolicy>,
-    },
-    /// Nouvelle exception, à appliquer immédiatement (vidage du cache DNS).
-    GrantAdded(TemporaryGrant),
-    GrantRevoked {
-        grant: crate::GrantId,
-    },
-    /// Demande au client de verrouiller une session maintenant.
+    State(Box<DeviceState>),
+    /// Verrouille immédiatement la session de ce compte.
     LockNow {
         os_account: String,
-    },
-    /// Les listes de blocage ont changé : l'agent les retélécharge.
-    BlocklistsUpdated {
-        checksum: String,
     },
     Pong,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SessionEventKind {
-    Login,
-    Logout,
-    Lock,
-    Unlock,
-    Idle,
-    Active,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum TamperKind {
     ResolverConfigChanged,
-    DohAttempt,
-    ServiceStopped,
-    ClockChanged,
     FirewallRulesMissing,
+    ClockChanged,
+    AgentRestarted,
+}
+
+/// Compteur de requêtes DNS pour un domaine sur une fenêtre de temps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomainCount {
+    pub domain: String,
+    pub allowed: u32,
+    pub blocked: u32,
+    /// Motif du dernier blocage observé.
+    pub reason: Option<BlockReason>,
 }
 
 /// Envoyé par l'agent au serveur.
@@ -67,36 +79,76 @@ pub enum TamperKind {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentMessage {
     Hello {
-        device: DeviceId,
         agent_version: String,
         protocol_version: u16,
-        /// Horodatage de la politique actuellement appliquée, pour éviter
-        /// un renvoi inutile.
-        policy_issued_at: Option<DateTime<Utc>>,
+        hostname: String,
+        /// Comptes de session présents sur l'appareil.
+        os_accounts: Vec<String>,
+        /// Horodatage de l'état actuellement appliqué.
+        state_issued_at: Option<DateTime<Utc>>,
     },
     Ping,
-    Session {
+    /// Temps d'écran cumulé d'un compte pour une journée locale. La valeur
+    /// est absolue : la renvoyer deux fois ne compte pas double.
+    Usage {
         os_account: String,
-        kind: SessionEventKind,
-        at: DateTime<Utc>,
+        day: NaiveDate,
+        seconds: u32,
+        /// Compte actuellement au premier plan et déverrouillé.
+        active: bool,
     },
-    /// Agrégat de requêtes DNS pour une fenêtre de temps (niveau 2).
+    /// Agrégat de requêtes DNS (niveau 2 du suivi).
     DnsSummary {
         os_account: Option<String>,
-        from: DateTime<Utc>,
-        to: DateTime<Utc>,
-        /// Domaine → (requêtes autorisées, requêtes bloquées).
-        domains: Vec<(String, u32, u32)>,
+        day: NaiveDate,
+        domains: Vec<DomainCount>,
     },
     Tamper {
         kind: TamperKind,
         at: DateTime<Utc>,
         details: String,
     },
-    /// Demande émise par l'enfant depuis la page de blocage ou le helper.
-    AccessRequest {
-        os_account: String,
-        target: crate::GrantTarget,
-        message: Option<String>,
-    },
+}
+
+/// Corps de `POST /api/v1/agent/enroll`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrollRequest {
+    pub token: String,
+    pub hostname: String,
+    pub os: String,
+    pub agent_version: String,
+    pub os_accounts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrollResponse {
+    pub device: DeviceId,
+    /// Jeton permanent de l'appareil, à conserver en lecture root seule.
+    pub device_token: String,
+}
+
+/// Corps de `POST /api/v1/agent/child-link` : lien à usage unique ouvrant
+/// l'espace enfant depuis l'appareil.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChildLinkRequest {
+    pub os_account: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChildLinkResponse {
+    pub url: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn messages_are_tagged_by_type() {
+        let json = serde_json::to_string(&AgentMessage::Ping).unwrap();
+        assert_eq!(json, r#"{"type":"ping"}"#);
+        let msg: ServerMessage =
+            serde_json::from_str(r#"{"type":"lock_now","os_account":"louis"}"#).unwrap();
+        assert_eq!(msg, ServerMessage::LockNow { os_account: "louis".into() });
+    }
 }

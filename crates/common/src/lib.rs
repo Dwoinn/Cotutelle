@@ -1,14 +1,20 @@
 //! Types partagés entre le serveur et l'agent Cotutelle.
 //!
 //! Ce crate ne contient aucune E/S : uniquement le modèle du domaine
-//! (§6 du document de cadrage), l'évaluation des politiques et le protocole
-//! agent ↔ serveur. Le moteur de filtrage DNS viendra ici en phase 1.
+//! (§6 du document de cadrage), le moteur de filtrage, l'évaluation des
+//! horaires et quotas, et le protocole agent ↔ serveur.
 
+pub mod access;
+pub mod catalog;
+pub mod filter;
 pub mod ids;
 pub mod policy;
 pub mod protocol;
 pub mod schedule;
+pub mod stats;
 
+pub use access::*;
+pub use filter::*;
 pub use ids::*;
 pub use policy::*;
 pub use schedule::*;

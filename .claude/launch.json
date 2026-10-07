@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cotutelle",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": ["run", "-p", "cotutelle-server", "--", "--http-addr", "127.0.0.1:8087", "--data-dir", "data/dev", "--web-dir", "web/build"],
+      "port": 8087
+    }
+  ]
+}
