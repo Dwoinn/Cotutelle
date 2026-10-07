@@ -4,6 +4,8 @@ description = "Serveur d'administration, API et DNS réseau local de Cotutelle"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "cotutelle-server"

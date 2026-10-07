@@ -4,6 +4,8 @@ description = "Relais DNS filtrant de Cotutelle, partagé entre le serveur et l'
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 cotutelle-common.workspace = true

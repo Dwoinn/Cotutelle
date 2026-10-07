@@ -103,4 +103,13 @@ scripts/        seed de développement, construction du .deb
 
 ## Licence
 
-Pas encore choisie. Tant qu'elle ne l'est pas, tous droits réservés.
+Cotutelle est un logiciel libre sous licence
+[GNU AGPL version 3 ou ultérieure](LICENSE). Vous pouvez l'utiliser, le
+modifier et le redistribuer, y compris en service hébergé, à deux conditions :
+
+- publier le code source de votre version sous la même licence ;
+- conserver l'attribution « Basé sur Cotutelle » dans l'interface.
+
+Le détail est dans [NOTICE.md](NOTICE.md). Le nom et le logo Cotutelle sont
+réservés au projet officiel : voir [MARQUE.md](MARQUE.md). Pour contribuer,
+lisez [CONTRIBUTING.md](CONTRIBUTING.md).

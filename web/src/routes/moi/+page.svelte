@@ -3,6 +3,7 @@
 	import { ApiError, api } from '#lib/api.ts';
 	import { attempt } from '#lib/app.svelte.ts';
 	import favicon from '#lib/assets/favicon.svg';
+	import About from '#lib/components/About.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Ring from '#lib/components/Ring.svelte';
 	import WeekChart from '#lib/components/WeekChart.svelte';
@@ -264,6 +265,7 @@
 			</div>
 		</details>
 	{/if}
+	<About />
 </div>
 
 <Modal bind:open={askOpen} title={ask?.title ?? ''}>

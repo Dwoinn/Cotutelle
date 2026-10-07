@@ -2,6 +2,7 @@
 	import { api } from '#lib/api.ts';
 	import { app, attempt } from '#lib/app.svelte.ts';
 	import favicon from '#lib/assets/favicon.svg';
+	import About from '#lib/components/About.svelte';
 
 	let name = $state('');
 	let password = $state('');
@@ -18,7 +19,7 @@
 	}
 </script>
 
-<div class="flex min-h-screen items-center justify-center p-4">
+<div class="flex min-h-screen flex-col items-center justify-center p-4">
 	<form class="card w-full max-w-sm space-y-4" onsubmit={submit}>
 		<div class="text-center">
 			<img src={favicon} alt="" class="mx-auto mb-3 h-14 w-14" />
@@ -35,4 +36,5 @@
 		</div>
 		<button class="btn-primary w-full" disabled={busy}>Se connecter</button>
 	</form>
+	<About />
 </div>

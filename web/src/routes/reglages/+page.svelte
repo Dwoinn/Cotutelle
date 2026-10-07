@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '#lib/api.ts';
 	import { app, attempt, resetCatalog } from '#lib/app.svelte.ts';
+	import About from '#lib/components/About.svelte';
 	import { ago } from '#lib/format.ts';
 	import type { Settings } from '#lib/types.ts';
 	import { onMount } from 'svelte';
@@ -179,7 +180,5 @@
 		</form>
 	</section>
 
-	{#if settings}
-		<p class="muted text-center text-xs">Cotutelle {settings.version}</p>
-	{/if}
+	<About version={settings?.version} />
 </div>

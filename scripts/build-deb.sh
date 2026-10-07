@@ -17,6 +17,20 @@ install -D -m 0644 packaging/cotutelle-agent.service "$ROOT/usr/lib/systemd/syst
 install -D -m 0644 packaging/cotutelle.desktop "$ROOT/usr/share/applications/cotutelle.desktop"
 install -D -m 0644 web/src/lib/assets/favicon.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/cotutelle.svg"
 install -D -m 0644 README.md "$ROOT/usr/share/doc/cotutelle-agent/README.md"
+cat > "$ROOT/usr/share/doc/cotutelle-agent/copyright" <<COPYRIGHT
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Cotutelle
+Source: https://github.com/Dwoinn/cotutelle
+
+Files: *
+Copyright: 2026 Donovan Winter et les contributeurs de Cotutelle
+License: AGPL-3.0-or-later
+ Ce programme est un logiciel libre, distribué sous la GNU Affero General
+ Public License version 3 ou ultérieure, avec les conditions supplémentaires
+ décrites dans NOTICE.md (attribution, nom réservé). Texte de la licence :
+ https://www.gnu.org/licenses/agpl-3.0.txt
+COPYRIGHT
+install -m 0644 NOTICE.md "$ROOT/usr/share/doc/cotutelle-agent/NOTICE.md"
 install -d "$ROOT/DEBIAN"
 install -m 0755 packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm "$ROOT/DEBIAN/"
 
