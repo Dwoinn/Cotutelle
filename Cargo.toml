@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = ["crates/common", "crates/server", "crates/agent"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+repository = "https://github.com/dwi/cotutelle"
+authors = ["dwi"]
+
+[workspace.dependencies]
+cotutelle-common = { path = "crates/common" }
+
+# Runtime
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive", "env"] }
+
+# Données
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Serveur web
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }
+
+# Persistance (phase 1)
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate", "chrono", "uuid"] }
+
+# DNS (phase 1)
+hickory-server = "0.25"
+hickory-resolver = "0.25"
+hickory-proto = "0.25"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

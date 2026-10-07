@@ -1,0 +1,21 @@
+[package]
+name = "cotutelle-agent"
+description = "Agent installé sur l'appareil protégé : résolveur DNS local, horaires, quota, verrouillage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "cotutelle-agent"
+path = "src/main.rs"
+
+[dependencies]
+cotutelle-common.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
