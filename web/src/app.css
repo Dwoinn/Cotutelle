@@ -1,94 +1,409 @@
 @import 'tailwindcss';
+@import '@fontsource-variable/bricolage-grotesque/wdth.css';
+@import '@fontsource-variable/atkinson-hyperlegible-next';
 
-@theme {
-	--font-sans: ui-rounded, 'SF Pro Rounded', 'Nunito', 'Segoe UI', system-ui, sans-serif;
-	--color-brand-50: #f3f1ff;
-	--color-brand-100: #e9e5ff;
-	--color-brand-200: #d5cdff;
-	--color-brand-300: #b6a8ff;
-	--color-brand-400: #9480ff;
-	--color-brand-500: #6d5dfc;
-	--color-brand-600: #5b45ee;
-	--color-brand-700: #4c36d1;
-	--color-brand-800: #3f2faa;
-	--color-brand-900: #352b86;
+/* Tous les chiffres de l'interface viennent de la police d'horloge, y compris
+   dans le texte courant : même dessin partout, et un zéro sans barre. */
+@font-face {
+	font-family: 'Cotutelle Chiffres';
+	font-style: normal;
+	font-display: swap;
+	font-weight: 200 800;
+	font-stretch: 75% 100%;
+	src: url('../node_modules/@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-wdth-normal.woff2') format('woff2-variations');
+	unicode-range: U+0030-0039;
+}
+
+/*
+ * Identité Cotutelle : la protection encadre, le temps vit à l'intérieur.
+ * Nuit (bleu) pour le bouclier et le cadre, Soleil (jaune) pour le temps.
+ * Les couleurs passent par des variables : le thème sombre et l'espace enfant
+ * « de nuit » les redéfinissent, sans variante `dark:` dans les composants.
+ */
+:root {
+	--bg: #eef2f6; /* Aube */
+	--surface: #ffffff;
+	--sunken: #e4eaf1;
+	--ink: #16203a; /* Nuit */
+	--muted: #5a6780; /* Brume */
+	--line: #d3dbe6;
+	--primary: #16203a;
+	--on-primary: #ffffff;
+	--sun: #ffc53d; /* Soleil */
+	--sun-soft: #fff0c4;
+	--ember: #d9541c; /* Braise */
+	--mint: #12805f; /* Menthe */
+	--mint-soft: #d9f2e9;
+	--cherry: #c2334a;
+	--cherry-soft: #fbe3e7;
+	--scrim: rgb(14 22 44 / 0.55);
+	color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0d152b;
+		--surface: #172244;
+		--sunken: #0f1934;
+		--ink: #eef2fa;
+		--muted: #9eabc6;
+		--line: #2b3a63;
+		--primary: #ffc53d;
+		--on-primary: #16203a;
+		--sun-soft: #3d3413;
+		--ember: #ff9a62;
+		--mint: #5ad6ad;
+		--mint-soft: #123a30;
+		--cherry: #ff8f9c;
+		--cherry-soft: #45202b;
+		--scrim: rgb(4 8 20 / 0.7);
+		color-scheme: dark;
+	}
+}
+
+/* L'espace enfant choisit sa phase lui-même : jour quand l'écran est ouvert,
+   nuit quand il est fermé, quel que soit le thème du système. */
+[data-phase='jour'] {
+	--bg: #eef2f6;
+	--surface: #ffffff;
+	--sunken: #e4eaf1;
+	--ink: #16203a;
+	--muted: #5a6780;
+	--line: #d3dbe6;
+	--primary: #16203a;
+	--on-primary: #ffffff;
+	--sun-soft: #fff0c4;
+	--ember: #d9541c;
+	--mint: #12805f;
+	--mint-soft: #d9f2e9;
+	--cherry: #c2334a;
+	--cherry-soft: #fbe3e7;
+	--scrim: rgb(14 22 44 / 0.55);
+	color-scheme: light;
+}
+[data-phase='nuit'] {
+	--bg: #0d152b;
+	--surface: #172244;
+	--sunken: #0f1934;
+	--ink: #eef2fa;
+	--muted: #9eabc6;
+	--line: #2b3a63;
+	--primary: #ffc53d;
+	--on-primary: #16203a;
+	--sun-soft: #3d3413;
+	--ember: #ff9a62;
+	--mint: #5ad6ad;
+	--mint-soft: #123a30;
+	--cherry: #ff8f9c;
+	--cherry-soft: #45202b;
+	--scrim: rgb(4 8 20 / 0.7);
+	color-scheme: dark;
+}
+
+@theme inline {
+	--font-sans: 'Cotutelle Chiffres', 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif;
+	--font-display: 'Bricolage Grotesque Variable', 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif;
+	--color-bg: var(--bg);
+	--color-surface: var(--surface);
+	--color-sunken: var(--sunken);
+	--color-ink: var(--ink);
+	--color-muted: var(--muted);
+	--color-line: var(--line);
+	--color-primary: var(--primary);
+	--color-on-primary: var(--on-primary);
+	--color-sun: var(--sun);
+	--color-sun-soft: var(--sun-soft);
+	--color-ember: var(--ember);
+	--color-mint: var(--mint);
+	--color-mint-soft: var(--mint-soft);
+	--color-cherry: var(--cherry);
+	--color-cherry-soft: var(--cherry-soft);
+	--color-night: #16203a;
 }
 
 @layer base {
 	html {
-		@apply bg-slate-50 text-slate-800 antialiased dark:bg-slate-950 dark:text-slate-200;
+		background: var(--bg);
+		color: var(--ink);
+		font-size: 17px;
+		line-height: 1.5;
+		-webkit-text-size-adjust: 100%;
+		-webkit-tap-highlight-color: transparent;
+		@apply font-sans antialiased;
+	}
+	@media (min-width: 640px) {
+		html {
+			font-size: 16px;
+		}
+	}
+	body {
+		min-height: 100dvh;
+	}
+	h1,
+	h2,
+	h3 {
+		@apply font-display;
+		font-stretch: 88%;
+		letter-spacing: -0.02em;
+		line-height: 1.15;
 	}
 	h1 {
-		@apply text-2xl font-bold tracking-tight;
+		font-size: 1.85rem;
+		font-weight: 700;
 	}
 	h2 {
-		@apply text-lg font-semibold;
+		font-size: 1.3rem;
+		font-weight: 700;
+	}
+	h3 {
+		font-size: 1.05rem;
+		font-weight: 650;
 	}
 	button,
 	a,
 	select,
-	summary {
-		@apply cursor-pointer;
+	summary,
+	label {
+		cursor: pointer;
 	}
 	:focus-visible {
-		@apply outline-brand-500 outline-2 outline-offset-2;
+		outline: 3px solid var(--sun);
+		outline-offset: 2px;
+		border-radius: 8px;
+	}
+	::selection {
+		background: var(--sun);
+		color: #16203a;
 	}
 }
 
 @layer components {
-	.card {
-		@apply rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900;
-	}
-
-	/* Boutons : une base commune, puis une couleur par variante. */
-	.btn,
-	.btn-primary,
-	.btn-soft,
-	.btn-ghost,
-	.btn-danger {
-		@apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-50;
-	}
-	.btn-primary {
-		@apply bg-brand-500 hover:bg-brand-600 text-white shadow-sm;
-	}
-	.btn-soft {
-		@apply bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-900/40 dark:text-brand-200 dark:hover:bg-brand-900/70;
-	}
-	.btn-ghost {
-		@apply text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800;
-	}
-	.btn-danger {
-		@apply bg-rose-50 text-rose-700 hover:bg-rose-100 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-950;
-	}
-	.btn-sm {
-		@apply px-3 py-1.5 text-xs;
-	}
-
-	.input {
-		@apply focus:border-brand-400 w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm outline-none dark:border-slate-700 dark:bg-slate-950;
-	}
-	.label {
-		@apply mb-1 block text-sm font-medium text-slate-600 dark:text-slate-400;
+	/* Chiffres et titres d'instrument : Bricolage en largeur resserrée. */
+	.display {
+		@apply font-display;
+		font-stretch: 82%;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		line-height: 1;
+		font-variant-numeric: tabular-nums;
 	}
 	.muted {
-		@apply text-sm text-slate-500 dark:text-slate-400;
+		color: var(--muted);
 	}
 
-	/* Pastilles : même principe que les boutons. */
-	.chip,
-	.pill-ok,
-	.pill-off,
-	.pill-warn {
-		@apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium;
+	/* Feuille : la seule surface posée sur le fond. Grand rayon, pas d'ombre. */
+	.panel {
+		background: var(--surface);
+		border-radius: 28px;
+		padding: 1.15rem;
 	}
-	.chip,
-	.pill-off {
-		@apply bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200;
+	@media (min-width: 640px) {
+		.panel {
+			padding: 1.5rem;
+		}
 	}
-	.pill-ok {
-		@apply bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300;
+
+	/* Boutons : cibles d'au moins 48 px, une variante par rôle. */
+	.btn,
+	.btn-primary,
+	.btn-sun,
+	.btn-quiet,
+	.btn-ghost,
+	.btn-danger {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		min-height: 3rem;
+		padding: 0 1.15rem;
+		border-radius: 16px;
+		font-weight: 650;
+		font-size: 1rem;
+		line-height: 1.2;
+		text-align: center;
+		transition:
+			transform 0.12s ease,
+			background-color 0.15s ease;
 	}
-	.pill-warn {
-		@apply bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300;
+	.btn:active,
+	.btn-primary:active,
+	.btn-sun:active,
+	.btn-quiet:active,
+	.btn-ghost:active,
+	.btn-danger:active {
+		transform: scale(0.97);
+	}
+	.btn:disabled,
+	.btn-primary:disabled,
+	.btn-sun:disabled,
+	.btn-quiet:disabled,
+	.btn-ghost:disabled,
+	.btn-danger:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+	.btn-primary {
+		background: var(--primary);
+		color: var(--on-primary);
+	}
+	.btn-sun {
+		background: var(--sun);
+		color: #16203a;
+	}
+	.btn-quiet {
+		background: var(--sunken);
+		color: var(--ink);
+	}
+	.btn-ghost {
+		color: var(--ink);
+	}
+	.btn-ghost:hover {
+		background: var(--sunken);
+	}
+	.btn-danger {
+		background: var(--cherry-soft);
+		color: var(--cherry);
+	}
+	.btn-sm {
+		min-height: 2.5rem;
+		padding: 0 0.9rem;
+		font-size: 0.92rem;
+		border-radius: 13px;
+	}
+	.btn-block {
+		width: 100%;
+	}
+	.icon-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.75rem;
+		height: 2.75rem;
+		border-radius: 14px;
+		color: var(--muted);
+		flex-shrink: 0;
+	}
+	.icon-btn:hover {
+		background: var(--sunken);
+		color: var(--ink);
+	}
+
+	/* Champs de saisie. */
+	.field {
+		width: 100%;
+		min-height: 3rem;
+		padding: 0.6rem 0.9rem;
+		border-radius: 14px;
+		background: var(--sunken);
+		border: 2px solid transparent;
+		color: var(--ink);
+		font-size: 1rem;
+		outline: none;
+	}
+	.field::placeholder {
+		color: var(--muted);
+		opacity: 0.8;
+	}
+	.field:focus {
+		border-color: var(--ink);
+		background: var(--surface);
+	}
+	.label {
+		display: block;
+		margin-bottom: 0.35rem;
+		font-size: 0.92rem;
+		font-weight: 600;
+	}
+	.hint {
+		margin-top: 0.35rem;
+		font-size: 0.86rem;
+		color: var(--muted);
+	}
+
+	/* Ligne de liste : une rangée tactile, séparée par un filet. */
+	.row {
+		display: flex;
+		align-items: center;
+		gap: 0.85rem;
+		min-height: 3.5rem;
+		padding: 0.6rem 0;
+		width: 100%;
+		text-align: left;
+	}
+	.rows > * + * {
+		border-top: 1px solid var(--line);
+	}
+
+	/* Étiquette d'état. */
+	.tag,
+	.tag-mint,
+	.tag-sun,
+	.tag-ember,
+	.tag-quiet {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0.2rem 0.6rem;
+		border-radius: 999px;
+		font-size: 0.82rem;
+		font-weight: 650;
+		white-space: nowrap;
+	}
+	.tag-mint {
+		background: var(--mint-soft);
+		color: var(--mint);
+	}
+	.tag-sun {
+		background: var(--sun-soft);
+		color: var(--ink);
+	}
+	.tag-ember {
+		background: color-mix(in srgb, var(--ember) 16%, transparent);
+		color: var(--ember);
+	}
+	.tag-quiet {
+		background: var(--sunken);
+		color: var(--muted);
+	}
+
+	/* Instrument : la zone tactile d'un cadran ou d'un bouclier. */
+	.instrument {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.15rem;
+		padding: 1rem 0.5rem 0.9rem;
+		border-radius: 22px;
+		background: var(--bg);
+		text-align: center;
+		transition:
+			transform 0.12s ease,
+			background-color 0.15s ease;
+	}
+	.instrument:hover {
+		background: var(--sunken);
+	}
+	.instrument:active {
+		transform: scale(0.98);
+	}
+}
+
+/* Feuille de bas d'écran : monte au toucher. L'animation ne touche qu'à la
+   position : si elle ne se joue pas, le contenu reste visible. */
+@keyframes sheet-up {
+	from {
+		transform: translateY(28px);
+	}
+}
+.sheet {
+	animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		transition-duration: 0.01ms !important;
 	}
 }

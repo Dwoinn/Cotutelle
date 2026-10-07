@@ -223,6 +223,11 @@ pas de titres de vidéos, pas de pages.
 
 ## 10. Interface
 
+**Identité** : la protection encadre, le temps vit à l'intérieur. Le bouclier
+(bleu nuit) porte le filtrage, le cadran (jaune soleil) porte le temps ; les
+deux ont le même poids, dans le logo comme à l'écran. L'interface est pensée
+d'abord pour le téléphone d'un parent. Détail dans `web/README.md`.
+
 **Espace parents** : tableau de bord (état des appareils, temps du jour par
 enfant, demandes en attente, alertes), fiches enfants, appareils, politiques
 par assistant, exceptions rapides (« +30 min », « YouTube 1 h »), journal.

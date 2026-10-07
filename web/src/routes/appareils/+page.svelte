@@ -2,11 +2,14 @@
 	import { api } from '#lib/api.ts';
 	import { attempt, catalog as loadCatalog } from '#lib/app.svelte.ts';
 	import FilterEditor from '#lib/components/FilterEditor.svelte';
-	import Modal from '#lib/components/Modal.svelte';
 	import ScheduleEditor from '#lib/components/ScheduleEditor.svelte';
+	import Sheet from '#lib/components/Sheet.svelte';
 	import { ago, clock } from '#lib/format.ts';
 	import { scheduleValid } from '#lib/schedule.ts';
 	import type { Catalog, Child, Device, Policy } from '#lib/types.ts';
+	import Laptop from '@lucide/svelte/icons/laptop';
+	import Plus from '@lucide/svelte/icons/plus';
+	import Tv from '@lucide/svelte/icons/tv';
 	import { onMount } from 'svelte';
 
 	let devices = $state<Device[]>([]);
@@ -20,11 +23,11 @@
 	let code = $state<null | { code: string; expires_at: number }>(null);
 	let knownAgents = 0;
 
-	// Ajout ou modification d'un appareil réseau
+	// Ajout ou modification d'un appareil sans agent
 	let netOpen = $state(false);
 	let net = $state({ id: '', name: '', ip: '', child_id: '' });
 
-	// Modification de la politique d'un appareil partagé
+	// Règles d'un appareil partagé
 	let policyOpen = $state(false);
 	let policyDevice = $state<Device | null>(null);
 	let policyDraft = $state<Policy | null>(null);
@@ -43,7 +46,7 @@
 		if (d) devices = d;
 		if (c) children = c;
 		loaded = true;
-		// L'ordinateur vient de s'enrôler : la fenêtre du code n'a plus lieu d'être.
+		// L'ordinateur vient de s'enrôler : la feuille du code n'a plus lieu d'être.
 		if (code && agents.length > knownAgents) {
 			code = null;
 			agentOpen = false;
@@ -83,7 +86,7 @@
 			name: net.name,
 			ip: net.ip,
 			child_id: net.child_id || null,
-			// Conserve la politique propre d'un appareil qui reste partagé.
+			// Conserve les règles propres d'un appareil qui reste partagé.
 			policy: net.child_id ? null : (existing?.policy ?? null)
 		};
 		const done = net.id
@@ -125,82 +128,81 @@
 	const childName = (id: string | null) => children.find((c) => c.id === id)?.name;
 </script>
 
-<div class="space-y-8">
+{#snippet removal(device: Device)}
+	{#if removing === device.id}
+		<div class="grid grid-cols-2 gap-2">
+			<button class="btn-danger btn-sm" onclick={() => remove(device)}>Supprimer</button>
+			<button class="btn-quiet btn-sm" onclick={() => (removing = null)}>Annuler</button>
+		</div>
+	{:else}
+		<button class="btn-ghost btn-sm text-muted" onclick={() => (removing = device.id)}>Supprimer</button>
+	{/if}
+{/snippet}
+
+<div class="space-y-10">
 	<section>
 		<div class="mb-1 flex items-center justify-between gap-3">
 			<h1>Ordinateurs</h1>
-			<button class="btn-soft" onclick={openAgent}>+ Ajouter</button>
+			<button class="btn-quiet btn-sm bg-surface" onclick={openAgent}><Plus size={18} /> Ajouter</button>
 		</div>
-		<p class="muted mb-3">
-			Un agent installé sur l'ordinateur filtre, compte le temps et verrouille la session. Il continue de protéger
-			hors de la maison.
+		<p class="muted mb-4 max-w-xl">
+			L'agent installé sur l'ordinateur filtre, compte le temps et verrouille la session. Il continue de protéger hors
+			de la maison.
 		</p>
 
 		{#if loaded && agents.length === 0}
-			<div class="card py-8 text-center">
-				<p class="text-4xl">💻</p>
-				<p class="mt-2 font-medium">Aucun ordinateur pour l'instant</p>
-				<button class="btn-primary mt-3" onclick={openAgent}>Ajouter un ordinateur</button>
+			<div class="panel py-9 text-center">
+				<h2>Aucun ordinateur pour l'instant</h2>
+				<p class="muted mx-auto mt-2 max-w-sm">Vous obtiendrez un code à saisir sur l'ordinateur à protéger.</p>
+				<button class="btn-primary mt-5" onclick={openAgent}><Plus size={20} /> Ajouter un ordinateur</button>
 			</div>
 		{/if}
 
-		<div class="grid gap-4 md:grid-cols-2">
+		<div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
 			{#each agents as device (device.id)}
-				<article class="card space-y-3">
-					<div class="flex items-start justify-between gap-3">
-						<div>
-							<p class="flex items-center gap-2 font-semibold"><span class="text-2xl">💻</span>{device.name}</p>
-							<p class="muted text-xs">
-								{device.hostname} · agent {device.agent_version}
-							</p>
+				<article class="panel min-w-0">
+					<div class="flex items-center gap-3">
+						<span class="bg-bg flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"><Laptop size={24} /></span>
+						<div class="min-w-0 flex-1">
+							<h2 class="text-[1.2rem]">{device.name}</h2>
+							<p class="muted truncate text-sm">{device.hostname}</p>
 						</div>
 						{#if device.online}
-							<span class="pill-ok">Connecté</span>
+							<span class="tag-mint shrink-0">Connecté</span>
 						{:else}
-							<span class="pill-off" title="La dernière politique connue reste appliquée">Vu {ago(device.last_seen)}</span>
+							<span class="tag-quiet shrink-0" title="Les dernières règles reçues restent appliquées">Vu {ago(device.last_seen)}</span>
 						{/if}
 					</div>
 
-					<div>
-						<p class="label">Qui utilise quel compte ?</p>
-						{#if device.os_accounts.length === 0}
-							<p class="muted text-xs">Aucun compte détecté pour l'instant.</p>
-						{/if}
-						<div class="space-y-2">
-							{#each device.os_accounts as account (account)}
-								<div class="flex items-center gap-3">
-									<span class="flex-1 truncate font-mono text-sm">
-										{account}
-										{#if device.active_accounts.includes(account)}<span class="pill-ok ml-1">en cours</span>{/if}
-									</span>
-									<select
-										class="input w-44"
-										aria-label="Enfant pour le compte {account}"
-										value={device.accounts[account] ?? ''}
-										onchange={(e) => setAccount(device, account, e.currentTarget.value)}
-									>
-										<option value="">Non filtré (parent)</option>
-										{#each children as child (child.id)}
-											<option value={child.id}>{child.emoji} {child.name}</option>
-										{/each}
-									</select>
-								</div>
-							{/each}
-						</div>
-						{#if device.os_accounts.length > 0 && Object.keys(device.accounts).length === 0}
-							<p class="pill-warn mt-2 rounded-2xl px-3 py-2 text-xs">
-								Aucun compte n'est rattaché à un enfant : cet ordinateur n'est pas encore filtré.
-							</p>
-						{/if}
+					<h3 class="mt-5 mb-1">Qui utilise quel compte ?</h3>
+					{#if device.os_accounts.length === 0}
+						<p class="muted text-sm">Aucun compte détecté pour l'instant.</p>
+					{/if}
+					<div class="space-y-3">
+						{#each device.os_accounts as account (account)}
+							<label class="block">
+								<span class="label flex items-center gap-2">
+									{account}
+									{#if device.active_accounts.includes(account)}<span class="tag-sun">en cours</span>{/if}
+								</span>
+								<select class="field" value={device.accounts[account] ?? ''} onchange={(e) => setAccount(device, account, e.currentTarget.value)}>
+									<option value="">Non filtré, compte d'un parent</option>
+									{#each children as child (child.id)}
+										<option value={child.id}>{child.name}</option>
+									{/each}
+								</select>
+							</label>
+						{/each}
 					</div>
+					{#if device.os_accounts.length > 0 && Object.keys(device.accounts).length === 0}
+						<p class="bg-sun-soft mt-3 rounded-2xl px-4 py-3 text-sm">
+							Aucun compte n'est rattaché à un enfant : cet ordinateur n'est pas encore filtré.
+						</p>
+					{/if}
 
-					<div class="flex justify-end border-t border-slate-100 pt-3 dark:border-slate-800">
-						{#if removing === device.id}
-							<button class="btn-danger btn-sm" onclick={() => remove(device)}>Confirmer la suppression</button>
-							<button class="btn-ghost btn-sm" onclick={() => (removing = null)}>Annuler</button>
-						{:else}
-							<button class="btn-ghost btn-sm" onclick={() => (removing = device.id)}>Supprimer</button>
-						{/if}
+					<div class="border-line mt-4 flex items-center justify-between gap-3 border-t pt-3">
+						<span class="muted text-sm">Agent {device.agent_version}</span>
+						{@render removal(device)}
 					</div>
 				</article>
 			{/each}
@@ -209,131 +211,128 @@
 
 	<section>
 		<div class="mb-1 flex items-center justify-between gap-3">
-			<h1>Appareils sans agent</h1>
-			<button class="btn-soft" onclick={() => openNet()}>+ Ajouter</button>
+			<h1>Sans agent</h1>
+			<button class="btn-quiet btn-sm bg-surface" onclick={() => openNet()}><Plus size={18} /> Ajouter</button>
 		</div>
-		<p class="muted mb-3">
-			Télévision, console, tablette : ils sont filtrés par le DNS de Cotutelle, reconnu à leur adresse IP. Le temps
-			d'écran n'y est pas compté.
+		<p class="muted mb-4 max-w-xl">
+			Télévision, console, tablette : filtrés par le DNS de Cotutelle, reconnus à leur adresse. Le temps d'écran n'y
+			est pas compté.
 		</p>
 
-		<div class="grid gap-4 md:grid-cols-2">
-			{#each network as device (device.id)}
-				<article class="card space-y-3">
-					<div class="flex items-start justify-between gap-3">
-						<div>
-							<p class="flex items-center gap-2 font-semibold"><span class="text-2xl">📺</span>{device.name}</p>
-							<p class="muted font-mono text-xs">{device.ip}</p>
+		{#if network.length > 0}
+			<div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+				{#each network as device (device.id)}
+					<article class="panel min-w-0">
+						<div class="flex items-center gap-3">
+							<span class="bg-bg flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl"><Tv size={24} /></span>
+							<div class="min-w-0 flex-1">
+								<h2 class="text-[1.2rem]">{device.name}</h2>
+								<p class="muted text-sm tabular-nums">{device.ip}</p>
+							</div>
+							<span class="tag-quiet">{device.child_id ? `Règles de ${childName(device.child_id) ?? '…'}` : 'Partagé'}</span>
 						</div>
-						<span class="chip">{device.child_id ? `Règles de ${childName(device.child_id) ?? '…'}` : 'Partagé'}</span>
-					</div>
-					<div class="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
-						{#if !device.child_id}
-							<button class="btn-soft btn-sm" onclick={() => openPolicy(device)}>Règles</button>
-						{/if}
-						<button class="btn-ghost btn-sm" onclick={() => openNet(device)}>Modifier</button>
-						{#if removing === device.id}
-							<button class="btn-danger btn-sm" onclick={() => remove(device)}>Confirmer</button>
-							<button class="btn-ghost btn-sm" onclick={() => (removing = null)}>Annuler</button>
-						{:else}
-							<button class="btn-ghost btn-sm" onclick={() => (removing = device.id)}>Supprimer</button>
-						{/if}
-					</div>
-				</article>
-			{/each}
-		</div>
+						<div class="border-line mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+							<div class="flex gap-2">
+								{#if !device.child_id}
+									<button class="btn-quiet btn-sm" onclick={() => openPolicy(device)}>Règles</button>
+								{/if}
+								<button class="btn-quiet btn-sm" onclick={() => openNet(device)}>Modifier</button>
+							</div>
+							{@render removal(device)}
+						</div>
+					</article>
+				{/each}
+			</div>
+		{/if}
 
-		<details class="card mt-4">
-			<summary class="font-semibold">Comment faire passer ces appareils par Cotutelle ?</summary>
-			<div class="muted mt-3 space-y-2">
+		<details class="panel group mt-4">
+			<summary class="flex list-none items-center justify-between gap-3 font-semibold [&::-webkit-details-marker]:hidden">
+				Faire passer ces appareils par Cotutelle
+				<Plus size={20} class="text-muted transition-transform group-open:rotate-45" />
+			</summary>
+			<div class="muted mt-3 max-w-xl space-y-3 text-[0.95rem]">
+				<p>Ces appareils doivent utiliser le serveur Cotutelle comme serveur DNS. Deux façons de faire :</p>
 				<p>
-					Les appareils doivent utiliser le serveur Cotutelle comme serveur DNS. Deux possibilités :
+					<strong class="text-ink">Sur la box.</strong> Dans les réglages DHCP, indiquez l'adresse du serveur Cotutelle
+					comme serveur DNS. Tout le réseau l'utilisera, et seuls les appareils déclarés ici seront filtrés.
 				</p>
-				<ol class="list-decimal space-y-1 pl-5">
-					<li>
-						<strong>Sur la box</strong> : dans les réglages DHCP, indiquez l'adresse IP du serveur Cotutelle comme
-						serveur DNS. Tous les appareils du réseau l'utiliseront ; seuls ceux déclarés ici sont filtrés.
-					</li>
-					<li>
-						<strong>Sur l'appareil</strong> : dans ses réglages réseau, choisissez une configuration DNS manuelle
-						et saisissez l'adresse IP du serveur.
-					</li>
-				</ol>
 				<p>
-					Donnez une adresse IP fixe à chaque appareil déclaré (bail DHCP statique sur la box), sinon le filtrage
-					se perd quand l'adresse change.
+					<strong class="text-ink">Sur l'appareil.</strong> Dans ses réglages réseau, choisissez un DNS manuel et
+					saisissez l'adresse du serveur.
 				</p>
+				<p>Donnez une adresse fixe à chaque appareil déclaré, sinon le filtrage se perd quand elle change.</p>
 			</div>
 		</details>
 	</section>
 </div>
 
-<Modal bind:open={agentOpen} title="Ajouter un ordinateur">
+<Sheet bind:open={agentOpen} title="Ajouter un ordinateur">
 	{#if !code}
 		<form class="space-y-4" onsubmit={createCode}>
 			<div>
 				<label class="label" for="agent-name">Nom de l'ordinateur</label>
-				<input id="agent-name" class="input" bind:value={agentName} placeholder="Portable de Louis" required maxlength="40" />
+				<input id="agent-name" class="field" bind:value={agentName} placeholder="Portable de Léo" required maxlength="40" />
 			</div>
-			<button class="btn-primary w-full">Obtenir un code</button>
+			<button class="btn-primary btn-block">Obtenir un code</button>
 		</form>
 	{:else}
-		<div class="space-y-4">
-			<div class="bg-brand-50 dark:bg-brand-900/30 rounded-2xl p-4 text-center">
-				<p class="muted text-xs">Code d'enrôlement, valable jusqu'à {clock(code.expires_at)}</p>
-				<p class="text-brand-700 dark:text-brand-200 mt-1 font-mono text-3xl font-bold tracking-widest">{code.code}</p>
+		<div class="space-y-5">
+			<div class="bg-sun text-night rounded-3xl p-5 text-center">
+				<p class="text-sm font-semibold">Code valable jusqu'à {clock(code.expires_at)}</p>
+				<p class="display mt-1 text-[2.6rem] tracking-[0.08em]">{code.code}</p>
 			</div>
-			<ol class="list-decimal space-y-2 pl-5 text-sm">
-				<li>Sur l'ordinateur à protéger, installez le paquet <code>cotutelle-agent</code>.</li>
+			<ol class="list-decimal space-y-3 pl-5 text-[0.95rem]">
+				<li>Sur l'ordinateur à protéger, installez le paquet <code class="font-semibold">cotutelle-agent</code>.</li>
 				<li>
 					Dans un terminal, avec un compte administrateur :
-					<pre class="mt-1 overflow-x-auto rounded-xl bg-slate-900 p-3 text-xs text-slate-100">sudo cotutelle-agent enroll \
+					<pre class="bg-night mt-2 overflow-x-auto rounded-2xl p-4 text-[0.8rem] leading-relaxed text-white">sudo cotutelle-agent enroll \
   --server {origin} \
   --code {code.code}
 sudo systemctl enable --now cotutelle-agent</pre>
 				</li>
-				<li>Cette fenêtre se fermera dès que l'ordinateur sera rattaché.</li>
 			</ol>
-			<p class="muted flex items-center gap-2 text-xs">
-				<span class="bg-brand-500 h-2 w-2 animate-pulse rounded-full"></span> En attente de l'ordinateur…
+			<p class="muted flex items-center gap-2 text-sm">
+				<span class="bg-sun h-2.5 w-2.5 animate-pulse rounded-full"></span>
+				En attente de l'ordinateur. Cette feuille se fermera toute seule.
 			</p>
 		</div>
 	{/if}
-</Modal>
+</Sheet>
 
-<Modal bind:open={netOpen} title={net.id ? "Modifier l'appareil" : 'Ajouter un appareil sans agent'}>
+<Sheet bind:open={netOpen} title={net.id ? "Modifier l'appareil" : 'Ajouter un appareil'}>
 	<form class="space-y-4" onsubmit={saveNet}>
 		<div>
 			<label class="label" for="net-name">Nom</label>
-			<input id="net-name" class="input" bind:value={net.name} placeholder="TV du salon" required maxlength="40" />
+			<input id="net-name" class="field" bind:value={net.name} placeholder="TV du salon" required maxlength="40" />
 		</div>
 		<div>
-			<label class="label" for="net-ip">Adresse IP sur le réseau local</label>
-			<input id="net-ip" class="input font-mono" bind:value={net.ip} placeholder="192.168.1.50" required />
+			<label class="label" for="net-ip">Adresse IP sur le réseau</label>
+			<input id="net-ip" class="field tabular-nums" bind:value={net.ip} placeholder="192.168.1.50" inputmode="decimal" required />
 		</div>
 		<div>
 			<label class="label" for="net-child">Règles appliquées</label>
-			<select id="net-child" class="input" bind:value={net.child_id}>
-				<option value="">Appareil partagé : les règles les plus strictes de la maison</option>
+			<select id="net-child" class="field" bind:value={net.child_id}>
+				<option value="">Appareil partagé, règles les plus strictes</option>
 				{#each children as child (child.id)}
-					<option value={child.id}>Celles de {child.name} (horaires et exceptions compris)</option>
+					<option value={child.id}>Celles de {child.name}</option>
 				{/each}
 			</select>
+			<p class="hint">Avec les règles d'un enfant, ses horaires et ses ouvertures s'appliquent aussi.</p>
 		</div>
-		<button class="btn-primary w-full">{net.id ? 'Enregistrer' : 'Ajouter'}</button>
+		<button class="btn-primary btn-block">{net.id ? 'Enregistrer' : 'Ajouter'}</button>
 	</form>
-</Modal>
+</Sheet>
 
-<Modal bind:open={policyOpen} title="Règles de {policyDevice?.name ?? ''}" wide>
+<Sheet bind:open={policyOpen} title="Règles de {policyDevice?.name ?? ''}" wide>
 	{#if policyDraft && catalog}
-		<div class="space-y-6">
+		<div class="space-y-8">
 			<FilterEditor bind:filter={policyDraft.filter} {catalog} />
 			<section>
-				<h3 class="font-semibold">Horaires</h3>
-				<p class="muted mb-3">En dehors de ces plages, l'appareil n'a plus accès à Internet.</p>
+				<h2>Horaires</h2>
+				<p class="muted mb-2 text-sm">En dehors de ces plages, l'appareil n'a plus accès à Internet.</p>
 				<ScheduleEditor bind:schedule={policyDraft.schedule} />
 			</section>
-			<button class="btn-primary w-full" disabled={!scheduleValid(policyDraft.schedule)} onclick={savePolicy}>Enregistrer</button>
+			<button class="btn-primary btn-block" disabled={!scheduleValid(policyDraft.schedule)} onclick={savePolicy}>Enregistrer</button>
 		</div>
 	{/if}
-</Modal>
+</Sheet>

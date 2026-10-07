@@ -1,127 +1,140 @@
 <script lang="ts">
-	import { DAY_LABELS, hm, minutes } from '#lib/format.ts';
+	import { DAY_LABELS, hm, minutes, range } from '#lib/format.ts';
 	import { ALL_DAY, FREE_DAYS, SCHOOL_DAYS, isAllDay, rangeValid, toMinutes, totalMinutes } from '#lib/schedule.ts';
 	import { DAYS, type Day, type Schedule, type TimeRange } from '#lib/types.ts';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import Plus from '@lucide/svelte/icons/plus';
+	import Trash from '@lucide/svelte/icons/trash';
+	import DayRibbon from './DayRibbon.svelte';
+	import Sheet from './Sheet.svelte';
 
-	// Éditeur des plages autorisées, jour par jour.
+	// Horaires de la semaine : une ligne par jour, modifiée dans une feuille.
 	let { schedule = $bindable() }: { schedule: Schedule } = $props();
+
+	let editing = $state<Day | null>(null);
+	let sheetOpen = $state(false);
+	let copied = $state<string | null>(null);
+
+	function edit(day: Day) {
+		editing = day;
+		copied = null;
+		sheetOpen = true;
+	}
+
+	function summary(ranges: TimeRange[]): string {
+		if (ranges.length === 0) return 'Aucun accès';
+		if (isAllDay(ranges)) return 'Toute la journée';
+		return ranges.map(range).join(', ');
+	}
+
+	const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}:00`;
 
 	function addRange(day: Day) {
 		const last = schedule[day].at(-1);
 		const start = last ? Math.min(toMinutes(last.end) + 60, 22 * 60) : 17 * 60;
 		const end = Math.min(start + 120, 24 * 60);
-		const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}:00`;
-		schedule[day] = [...schedule[day], { start: fmt(start), end: end >= 24 * 60 ? null : fmt(end) }];
+		const base = isAllDay(schedule[day]) ? [] : schedule[day];
+		schedule[day] = [...base, { start: fmt(start), end: end >= 24 * 60 ? null : fmt(end) }];
 	}
 
-	function removeRange(day: Day, index: number) {
-		schedule[day] = schedule[day].filter((_, i) => i !== index);
-	}
-
-	function setStart(range: TimeRange, value: string) {
-		if (value) range.start = `${value}:00`;
+	function setStart(r: TimeRange, value: string) {
+		if (value) r.start = `${value}:00`;
 	}
 
 	// Une fin à 00:00 signifie « jusqu'à minuit ».
-	function setEnd(range: TimeRange, value: string) {
-		if (value) range.end = value === '00:00' ? null : `${value}:00`;
+	function setEnd(r: TimeRange, value: string) {
+		if (value) r.end = value === '00:00' ? null : `${value}:00`;
 	}
 
-	function copy(from: Day, targets: Day[]) {
+	function copyTo(from: Day, targets: Day[], label: string) {
 		for (const day of targets) {
 			if (day !== from) schedule[day] = schedule[from].map((r) => ({ ...r }));
 		}
-	}
-
-	function onCopy(from: Day, event: Event) {
-		const select = event.currentTarget as HTMLSelectElement;
-		const targets: Record<string, Day[]> = { all: [...DAYS], school: SCHOOL_DAYS, free: FREE_DAYS };
-		if (targets[select.value]) copy(from, targets[select.value]);
-		select.value = '';
+		copied = label;
 	}
 </script>
 
-<div class="space-y-3">
+<div class="rows">
 	{#each DAYS as day (day)}
 		{@const ranges = schedule[day]}
-		<div class="rounded-2xl border border-slate-200 p-3 dark:border-slate-800">
-			<div class="flex flex-wrap items-center justify-between gap-2">
-				<div class="flex items-baseline gap-2">
-					<span class="w-20 text-sm font-semibold">{DAY_LABELS[day]}</span>
-					<span class="muted text-xs">
-						{#if ranges.length === 0}
-							aucun accès
-						{:else if isAllDay(ranges)}
-							toute la journée
-						{:else}
-							{minutes(totalMinutes(ranges))} possibles
-						{/if}
+		<button class="row" onclick={() => edit(day)}>
+			<span class="min-w-0 flex-1">
+				<span class="flex items-baseline justify-between gap-3">
+					<span class="font-semibold">{DAY_LABELS[day]}</span>
+					<span class="text-sm {ranges.every(rangeValid) ? 'muted' : 'text-cherry font-semibold'}">
+						{ranges.every(rangeValid) ? summary(ranges) : 'Plage invalide'}
 					</span>
-				</div>
-				<div class="flex items-center gap-1">
-					<button class="btn-ghost btn-sm" onclick={() => addRange(day)}>+ Plage</button>
-					{#if !isAllDay(ranges)}
-						<button class="btn-ghost btn-sm" onclick={() => (schedule[day] = [{ ...ALL_DAY }])}>Toute la journée</button>
-					{/if}
-					<select
-						class="btn-ghost btn-sm appearance-none bg-transparent"
-						aria-label="Copier {DAY_LABELS[day]} vers d'autres jours"
-						onchange={(e) => onCopy(day, e)}
-					>
-						<option value="">Copier vers…</option>
-						<option value="all">Tous les jours</option>
-						<option value="school">Jours d'école</option>
-						<option value="free">Mercredi et week-end</option>
-					</select>
-				</div>
-			</div>
+				</span>
+				<span class="mt-2 block"><DayRibbon {ranges} /></span>
+			</span>
+			<ChevronRight size={20} class="text-muted shrink-0" />
+		</button>
+	{/each}
+</div>
+<div class="muted mt-1 flex justify-between pr-8 text-xs" aria-hidden="true">
+	<span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span>
+</div>
 
-			<!-- Frise de la journée : les plages autorisées en couleur. -->
-			<div class="relative mt-2 h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" aria-hidden="true">
-				{#each ranges.filter(rangeValid) as r, i (i)}
-					<div
-						class="bg-brand-400 absolute inset-y-0 rounded-full"
-						style:left="{(toMinutes(r.start) / 1440) * 100}%"
-						style:width="{((toMinutes(r.end) - toMinutes(r.start)) / 1440) * 100}%"
-					></div>
-				{/each}
-			</div>
-			<div class="muted mt-0.5 flex justify-between text-[10px]" aria-hidden="true">
-				<span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span>
+<Sheet bind:open={sheetOpen} title={editing ? DAY_LABELS[editing] : ''}>
+	{#if editing}
+		{@const day = editing}
+		{@const ranges = schedule[day]}
+		<div class="space-y-5">
+			<div>
+				<DayRibbon {ranges} />
+				<p class="muted mt-2 text-sm">
+					{#if ranges.length === 0}
+						Aucun accès ce jour-là.
+					{:else if isAllDay(ranges)}
+						Accès toute la journée, dans la limite du temps d'écran.
+					{:else}
+						{minutes(totalMinutes(ranges))} de plage en tout.
+					{/if}
+				</p>
 			</div>
 
 			{#if ranges.length > 0 && !isAllDay(ranges)}
-				<div class="mt-2 flex flex-wrap gap-2">
+				<div class="space-y-2">
 					{#each ranges as r, i (i)}
-						<div
-							class="flex items-center gap-1 rounded-full border px-2 py-1 text-sm {rangeValid(r)
-								? 'border-slate-200 dark:border-slate-700'
-								: 'border-rose-400 bg-rose-50 dark:bg-rose-950/40'}"
-						>
-							<input
-								type="time"
-								class="bg-transparent outline-none"
-								aria-label="Début"
-								value={hm(r.start)}
-								onchange={(e) => setStart(r, e.currentTarget.value)}
-							/>
-							<span class="muted">→</span>
-							<input
-								type="time"
-								class="bg-transparent outline-none"
-								aria-label="Fin"
-								value={r.end === null ? '00:00' : hm(r.end)}
-								onchange={(e) => setEnd(r, e.currentTarget.value)}
-							/>
-							<button class="muted px-1 hover:text-rose-600" aria-label="Supprimer la plage" onclick={() => removeRange(day, i)}>
-								✕
+						<div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2">
+							<label class="min-w-0">
+								<span class="label">De</span>
+								<input type="time" class="field px-2 {rangeValid(r) ? '' : 'border-cherry'}" value={hm(r.start)} onchange={(e) => setStart(r, e.currentTarget.value)} />
+							</label>
+							<label class="min-w-0">
+								<span class="label">À</span>
+								<input type="time" class="field px-2 {rangeValid(r) ? '' : 'border-cherry'}" value={r.end === null ? '00:00' : hm(r.end)} onchange={(e) => setEnd(r, e.currentTarget.value)} />
+							</label>
+							<button class="icon-btn mb-0.5" aria-label="Supprimer cette plage" onclick={() => (schedule[day] = schedule[day].filter((_, j) => j !== i))}>
+								<Trash size={20} />
 							</button>
 						</div>
+						{#if !rangeValid(r)}
+							<p class="text-cherry text-sm">La fin doit être après le début.</p>
+						{/if}
 					{/each}
 				</div>
-			{:else if isAllDay(ranges)}
-				<button class="muted mt-2 text-xs underline" onclick={() => (schedule[day] = [])}>Bloquer toute la journée</button>
 			{/if}
+
+			<div class="grid gap-2">
+				<button class="btn-quiet" onclick={() => addRange(day)}><Plus size={20} /> Ajouter une plage</button>
+				<div class="grid grid-cols-2 gap-2">
+					<button class="btn-ghost border-line border" disabled={isAllDay(ranges)} onclick={() => (schedule[day] = [{ ...ALL_DAY }])}>Toute la journée</button>
+					<button class="btn-ghost border-line border" disabled={ranges.length === 0} onclick={() => (schedule[day] = [])}>Aucun accès</button>
+				</div>
+			</div>
+
+			<section>
+				<h3 class="mb-2">Appliquer aussi à</h3>
+				<div class="grid gap-2">
+					<button class="btn-quiet" onclick={() => copyTo(day, SCHOOL_DAYS, "les jours d'école")}>Lundi, mardi, jeudi, vendredi</button>
+					<button class="btn-quiet" onclick={() => copyTo(day, FREE_DAYS, 'mercredi et le week-end')}>Mercredi, samedi, dimanche</button>
+					<button class="btn-quiet" onclick={() => copyTo(day, [...DAYS], 'toute la semaine')}>Toute la semaine</button>
+				</div>
+				{#if copied}<p class="text-mint mt-2 text-sm font-semibold" role="status">Copié sur {copied}.</p>{/if}
+			</section>
+
+			<button class="btn-primary btn-block" onclick={() => (sheetOpen = false)}>Terminé</button>
 		</div>
-	{/each}
-</div>
+	{/if}
+</Sheet>

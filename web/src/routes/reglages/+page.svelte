@@ -69,72 +69,66 @@
 	}
 </script>
 
-<div class="space-y-6">
+<div class="mx-auto max-w-2xl space-y-5">
 	<h1>Réglages</h1>
 
 	{#if settings}
-		<section class="card space-y-3">
-			<h2>Listes de blocage</h2>
+		<section class="panel">
+			<h2>Listes de sites</h2>
 			{#if settings.blocklists.categories > 0}
-				<p class="text-sm">
-					<strong>{fmt.format(settings.blocklists.entries)}</strong> sites dans
-					<strong>{settings.blocklists.categories}</strong> catégories, mis à jour {ago(settings.blocklists.updated_at)}.
+				<p class="display mt-3 text-4xl">{fmt.format(settings.blocklists.entries)}</p>
+				<p class="muted">
+					sites connus, dans {settings.blocklists.categories} catégories. Mises à jour {ago(settings.blocklists.updated_at)}.
 				</p>
 			{:else}
-				<p class="pill-warn rounded-2xl px-4 py-3 text-sm">
-					Les listes ne sont pas encore téléchargées. Le filtrage par catégorie est inactif.
-				</p>
+				<p class="bg-sun-soft mt-3 rounded-2xl px-4 py-3">Pas encore téléchargées. Le filtrage par catégorie est inactif.</p>
 			{/if}
-			<p class="muted text-xs">
-				Source : listes de l'Université Toulouse Capitole (licence CC BY-SA 4.0), rafraîchies automatiquement chaque
-				jour.
-			</p>
-			<button class="btn-soft" disabled={refreshing} onclick={refreshLists}>
+			<button class="btn-quiet mt-4" disabled={refreshing} onclick={refreshLists}>
 				{refreshing ? 'Téléchargement en cours…' : 'Mettre à jour maintenant'}
 			</button>
+			<p class="hint">Listes de l'Université Toulouse Capitole, licence CC BY-SA 4.0, rafraîchies chaque jour.</p>
 		</section>
 
-		<section class="card space-y-3">
+		<section class="panel">
 			<h2>Notifications sur téléphone</h2>
-			<p class="muted">
+			<p class="muted mt-1 mb-4 text-[0.95rem]">
 				Recevez les demandes des enfants et les alertes avec l'application gratuite
-				<a class="underline" href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a>. Choisissez un nom de
-				sujet difficile à deviner, abonnez-vous à ce sujet dans l'application, puis collez son adresse ici.
+				<a class="underline underline-offset-2" href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a>. Choisissez
+				un nom de sujet difficile à deviner, abonnez-vous-y dans l'application, puis collez son adresse ici.
 			</p>
 			<form
-				class="flex flex-wrap gap-2"
+				class="space-y-2"
 				onsubmit={(e) => {
 					e.preventDefault();
 					save({ ntfy_url: settings!.ntfy_url }, 'Notifications enregistrées');
 				}}
 			>
-				<input class="input flex-1" bind:value={settings.ntfy_url} placeholder="https://ntfy.sh/famille-dupont-x7k2m9" aria-label="Adresse du sujet ntfy" />
+				<label class="label" for="ntfy">Adresse du sujet</label>
+				<input id="ntfy" class="field" bind:value={settings.ntfy_url} placeholder="https://ntfy.sh/famille-x7k2m9q4" inputmode="url" autocapitalize="off" />
+				<p class="hint">Laissez vide pour désactiver. Le texte des notifications passe par le serveur ntfy indiqué.</p>
 				<button class="btn-primary">Enregistrer</button>
 			</form>
-			<p class="muted text-xs">
-				Laissez vide pour désactiver. Le texte des notifications transite par le serveur ntfy indiqué.
-			</p>
 		</section>
 
-		<section class="card space-y-4">
-			<h2>Réseau et confidentialité</h2>
+		<section class="panel">
+			<h2>Réseau et historique</h2>
 			<form
-				class="space-y-4"
+				class="mt-4 space-y-4"
 				onsubmit={(e) => {
 					e.preventDefault();
 					save({ upstream_dns: settings!.upstream_dns, retention_days: settings!.retention_days }, 'Réglages enregistrés');
 				}}
 			>
 				<div>
-					<label class="label" for="dns">Résolveurs DNS utilisés pour les sites autorisés</label>
-					<input id="dns" class="input font-mono" bind:value={settings.upstream_dns} />
-					<p class="muted mt-1 text-xs">Séparés par des virgules. Par défaut Quad9, qui bloque aussi les sites malveillants.</p>
+					<label class="label" for="dns">Résolveurs DNS de secours</label>
+					<input id="dns" class="field tabular-nums" bind:value={settings.upstream_dns} autocapitalize="off" />
+					<p class="hint">Séparés par des virgules. Par défaut Quad9, qui écarte aussi les sites malveillants.</p>
 				</div>
 				<div>
-					<label class="label" for="retention">Conservation de l'historique d'activité</label>
-					<div class="flex items-center gap-2">
-						<input id="retention" type="number" min="1" max="365" class="input w-24" bind:value={settings.retention_days} />
-						<span class="muted">jours</span>
+					<label class="label" for="retention">Conserver l'activité pendant</label>
+					<div class="flex items-center gap-3">
+						<input id="retention" type="number" inputmode="numeric" min="1" max="365" class="field w-28" bind:value={settings.retention_days} />
+						<span>jours</span>
 					</div>
 				</div>
 				<button class="btn-primary">Enregistrer</button>
@@ -142,41 +136,58 @@
 		</section>
 	{/if}
 
-	<section class="card space-y-4">
+	<section class="panel">
 		<h2>Parents</h2>
-		<ul class="divide-y divide-slate-100 dark:divide-slate-800">
+		<div class="rows mt-1">
 			{#each parents as parent (parent.id)}
-				<li class="flex items-center justify-between gap-3 py-2">
-					<span class="font-medium">
+				<div class="row justify-between">
+					<span class="font-semibold">
 						{parent.name}
-						{#if parent.id === app.parent?.id}<span class="muted text-xs font-normal">· vous</span>{/if}
+						{#if parent.id === app.parent?.id}<span class="tag-quiet ml-1">vous</span>{/if}
 					</span>
 					{#if parent.id !== app.parent?.id}
 						{#if removing === parent.id}
 							<span class="flex gap-2">
-								<button class="btn-danger btn-sm" onclick={() => removeParent(parent)}>Confirmer</button>
-								<button class="btn-ghost btn-sm" onclick={() => (removing = null)}>Annuler</button>
+								<button class="btn-danger btn-sm" onclick={() => removeParent(parent)}>Supprimer</button>
+								<button class="btn-quiet btn-sm" onclick={() => (removing = null)}>Annuler</button>
 							</span>
 						{:else}
-							<button class="btn-ghost btn-sm" onclick={() => (removing = parent.id)}>Supprimer</button>
+							<button class="btn-ghost btn-sm text-muted" onclick={() => (removing = parent.id)}>Supprimer</button>
 						{/if}
 					{/if}
-				</li>
+				</div>
 			{/each}
-		</ul>
-		<form class="grid gap-2 sm:grid-cols-[1fr_1fr_auto]" onsubmit={addParent}>
-			<input class="input" bind:value={newParent.name} placeholder="Nom du second parent" aria-label="Nom" required />
-			<input type="password" class="input" bind:value={newParent.password} placeholder="Mot de passe (8 caractères min.)" aria-label="Mot de passe" minlength="8" autocomplete="new-password" required />
-			<button class="btn-soft">Ajouter</button>
+		</div>
+		<form class="border-line mt-2 space-y-3 border-t pt-4" onsubmit={addParent}>
+			<h3>Ajouter un parent</h3>
+			<div class="grid gap-3 sm:grid-cols-2">
+				<div>
+					<label class="label" for="parent-name">Nom</label>
+					<input id="parent-name" class="field" bind:value={newParent.name} required />
+				</div>
+				<div>
+					<label class="label" for="parent-password">Mot de passe</label>
+					<input id="parent-password" type="password" class="field" bind:value={newParent.password} minlength="8" autocomplete="new-password" required />
+				</div>
+			</div>
+			<button class="btn-quiet">Ajouter</button>
 		</form>
 	</section>
 
-	<section class="card space-y-3">
+	<section class="panel">
 		<h2>Mon mot de passe</h2>
-		<form class="grid gap-2 sm:grid-cols-[1fr_1fr_auto]" onsubmit={changePassword}>
-			<input type="password" class="input" bind:value={passwords.current} placeholder="Mot de passe actuel" aria-label="Mot de passe actuel" autocomplete="current-password" required />
-			<input type="password" class="input" bind:value={passwords.new} placeholder="Nouveau mot de passe" aria-label="Nouveau mot de passe" minlength="8" autocomplete="new-password" required />
-			<button class="btn-soft">Modifier</button>
+		<form class="mt-4 space-y-3" onsubmit={changePassword}>
+			<div class="grid gap-3 sm:grid-cols-2">
+				<div>
+					<label class="label" for="pw-current">Actuel</label>
+					<input id="pw-current" type="password" class="field" bind:value={passwords.current} autocomplete="current-password" required />
+				</div>
+				<div>
+					<label class="label" for="pw-new">Nouveau</label>
+					<input id="pw-new" type="password" class="field" bind:value={passwords.new} minlength="8" autocomplete="new-password" required />
+				</div>
+			</div>
+			<button class="btn-quiet">Modifier</button>
 		</form>
 	</section>
 

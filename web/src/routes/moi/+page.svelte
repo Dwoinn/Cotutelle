@@ -2,32 +2,43 @@
 	import { page } from '$app/state';
 	import { ApiError, api } from '#lib/api.ts';
 	import { attempt } from '#lib/app.svelte.ts';
-	import favicon from '#lib/assets/favicon.svg';
 	import About from '#lib/components/About.svelte';
-	import Modal from '#lib/components/Modal.svelte';
-	import Ring from '#lib/components/Ring.svelte';
+	import Avatar from '#lib/components/Avatar.svelte';
+	import Dial from '#lib/components/Dial.svelte';
+	import Logo from '#lib/components/Logo.svelte';
+	import Segmented from '#lib/components/Segmented.svelte';
+	import Sheet from '#lib/components/Sheet.svelte';
+	import Shield from '#lib/components/Shield.svelte';
 	import WeekChart from '#lib/components/WeekChart.svelte';
-	import { minutes, opening, range, seconds, targetIcon, targetLabel, until } from '#lib/format.ts';
+	import { filterGrants, grantRemaining, minutes, nowMinutes, opening, seconds, targetLabel, timeLine } from '#lib/format.ts';
 	import type { ChildSpace, GrantTarget } from '#lib/types.ts';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import Clock from '@lucide/svelte/icons/clock';
+	import LockOpen from '@lucide/svelte/icons/lock-open';
+	import Moon from '@lucide/svelte/icons/moon';
+	import Pause from '@lucide/svelte/icons/pause';
 	import { onMount } from 'svelte';
 
-	// Espace de l'enfant : son temps, ses demandes, et ce que ses parents voient.
+	// Espace de l'enfant : son temps, son filtre, ses demandes, et ce que ses parents voient.
 	const preview = $derived(page.url.searchParams.get('apercu'));
 	const expired = $derived(page.url.searchParams.get('lien') === 'expire');
 
 	let space = $state<ChildSpace | null>(null);
 	let signedOut = $state(false);
+	let minute = $state(nowMinutes());
+	let width = $state(360);
 
-	let askOpen = $state(false);
-	let ask = $state<{ title: string; target: GrantTarget; timed: boolean } | null>(null);
+	let timeOpen = $state(false);
+	let siteOpen = $state(false);
 	let askMinutes = $state(30);
-	let askMessage = $state('');
+	let message = $state('');
 	let site = $state('');
 	let busy = $state(false);
 
 	async function load() {
 		try {
 			space = await api.get<ChildSpace>(preview ? `/children/${preview}/space` : '/child/me');
+			minute = nowMinutes();
 			signedOut = false;
 		} catch (error) {
 			if (error instanceof ApiError && error.status === 401) signedOut = true;
@@ -40,254 +51,247 @@
 		return () => clearInterval(timer);
 	});
 
-	function openAsk(title: string, target: GrantTarget, timed = true) {
-		ask = { title, target, timed };
-		askMinutes = 30;
-		askMessage = '';
-		askOpen = true;
-	}
-
-	async function send() {
-		if (!ask) return;
+	async function send(target: GrantTarget, duration?: number) {
 		busy = true;
-		const body = { target: ask.target, minutes: ask.timed ? askMinutes : undefined, message: askMessage || undefined };
-		const done = await attempt(() => api.post('/child/requests', body), 'Demande envoyée à tes parents');
+		const done = await attempt(
+			() => api.post('/child/requests', { target, minutes: duration, message: message || undefined }),
+			'Demande envoyée à tes parents'
+		);
 		busy = false;
 		if (done) {
-			askOpen = false;
+			timeOpen = false;
+			siteOpen = false;
 			site = '';
+			message = '';
 			load();
 		}
 	}
 
 	const status = $derived(space?.status);
-	const color = $derived(space?.child.color ?? '#6d5dfc');
-
-	const ring = $derived.by(() => {
-		if (!space || !status) return 0;
-		if (!status.open) return 0;
-		if (!status.quota_today_minutes) return 1;
+	// Le jour quand l'écran est ouvert, la nuit quand il est fermé.
+	const phase = $derived(status ? (status.open ? 'jour' : 'nuit') : undefined);
+	const dial = $derived(Math.round(Math.min(310, Math.max(220, width - 56))));
+	const remaining = $derived.by(() => {
+		if (!space || !status?.quota_today_minutes) return null;
 		return Math.max(0, 1 - space.used_today_seconds / 60 / status.quota_today_minutes);
 	});
+	const line = $derived(space && status ? timeLine(status, space.today_ranges, space.next_opening, minute) : '');
+	const opened = $derived(space ? filterGrants(space.grants) : []);
+	const blocked = $derived(space?.blocked_today ?? 0);
 
-	const CLOSED: Record<string, { icon: string; title: string; text: string }> = {
-		paused: { icon: '⏸️', title: 'Écran en pause', text: 'Tes parents ont mis l’écran en pause pour le moment.' },
-		outside_schedule: { icon: '🌙', title: 'Ce n’est pas l’heure', text: 'Tu es en dehors de tes horaires d’écran.' },
-		daily_quota: { icon: '✅', title: 'C’est fini pour aujourd’hui', text: 'Tu as utilisé tout ton temps d’écran du jour.' },
-		weekly_quota: { icon: '✅', title: 'C’est fini pour cette semaine', text: 'Tu as utilisé tout ton temps d’écran de la semaine.' }
+	const CLOSED: Record<string, string> = {
+		paused: 'Tes parents ont mis l’écran en pause.',
+		outside_schedule: 'Ce n’est pas l’heure de l’écran.',
+		daily_quota: 'Tu as utilisé tout ton temps d’aujourd’hui.',
+		weekly_quota: 'Tu as utilisé tout ton temps de la semaine.'
 	};
-
-	const STATUS_LABEL = { pending: '⏳ En attente', approved: '✅ Accordé', denied: '❌ Refusé' } as const;
-	const pending = $derived(space?.requests.filter((r) => r.status === 'pending').length ?? 0);
+	const STATUS = { pending: 'En attente', approved: 'Accordé', denied: 'Refusé' } as const;
+	const STATUS_TAG = { pending: 'tag-sun', approved: 'tag-mint', denied: 'tag-quiet' } as const;
 </script>
 
-<div class="mx-auto min-h-screen max-w-xl px-4 pt-6 pb-12">
-	{#if signedOut}
-		<div class="card mt-16 text-center">
-			<img src={favicon} alt="" class="mx-auto mb-3 h-14 w-14" />
-			<h1>{expired ? 'Ce lien a expiré' : 'Ton espace Cotutelle'}</h1>
-			<p class="muted mt-2">
-				Pour voir ton temps d'écran et faire une demande, ouvre « Mon temps d'écran » depuis le menu de ton
-				ordinateur.
-			</p>
-		</div>
-	{:else if !space || !status}
-		<p class="muted mt-16 text-center">Chargement…</p>
-	{:else}
-		{#if preview}
-			<p class="pill-warn mb-4 w-full justify-center rounded-2xl py-2 text-sm">
-				Aperçu parent : voici exactement ce que {space.child.name} voit.
-			</p>
-		{/if}
-
-		<header class="mb-6 flex items-center gap-3">
-			<span class="flex h-14 w-14 items-center justify-center rounded-3xl text-3xl" style:background="{color}22">
-				{space.child.emoji}
-			</span>
-			<div>
-				<p class="muted">Bonjour</p>
-				<h1>{space.child.name}</h1>
-			</div>
-		</header>
-
-		<section class="card flex flex-col items-center gap-4 py-8 text-center">
-			{#if status.open}
-				<Ring value={ring} size={220} stroke={18} {color}>
-					{#if status.remaining_minutes === null}
-						<span class="text-5xl font-bold">∞</span>
-						<span class="muted">pas de limite</span>
-					{:else}
-						<span class="text-4xl font-bold tabular-nums">{minutes(status.remaining_minutes)}</span>
-						<span class="muted">restantes</span>
-					{/if}
-				</Ring>
-				<p class="muted">
-					Tu as utilisé <strong class="text-slate-700 dark:text-slate-200">{seconds(space.used_today_seconds)}</strong>
-					aujourd'hui{#if status.quota_today_minutes}&nbsp;sur {minutes(status.quota_today_minutes)}{/if}.
+<div class="bg-bg text-ink min-h-dvh transition-colors duration-700" data-phase={phase}>
+	<div class="mx-auto max-w-md px-4 pt-5 pb-12" bind:clientWidth={width}>
+		{#if signedOut}
+			<div class="flex min-h-[80dvh] flex-col justify-center">
+				<div class="mb-6"><Logo size={52} /></div>
+				<h1 class="text-[2.2rem]">{expired ? 'Ce lien a expiré.' : 'Ton espace Cotutelle'}</h1>
+				<p class="muted mt-3 text-lg">
+					Pour voir ton temps d'écran et faire une demande, ouvre « Mon temps d'écran » depuis le menu de ton
+					ordinateur.
 				</p>
-			{:else}
-				{@const info = CLOSED[status.reason ?? 'daily_quota']}
-				<p class="text-6xl">{info.icon}</p>
-				<h2 class="text-2xl">{info.title}</h2>
-				<p class="muted max-w-xs">{info.text}</p>
-				{#if status.reason === 'outside_schedule' && opening(space.next_opening)}
-					<p class="pill-ok text-sm">Reprise {opening(space.next_opening)}</p>
-				{/if}
+			</div>
+		{:else if space && status}
+			{#if preview}
+				<p class="bg-sun text-night mb-4 rounded-2xl px-4 py-3 text-center text-sm font-semibold">
+					Aperçu parent : voici exactement ce que {space.child.name} voit.
+				</p>
 			{/if}
 
-			{#if space.today_ranges.length > 0}
-				<div class="flex flex-wrap justify-center gap-2">
-					<span class="muted text-xs">Tes horaires aujourd'hui :</span>
-					{#each space.today_ranges as r, i (i)}
-						<span class="chip">{range(r)}</span>
-					{/each}
+			<header class="flex items-center gap-3">
+				<Avatar name={space.child.name} color={space.child.color} size={48} />
+				<div>
+					<p class="muted text-sm leading-tight">Bonjour</p>
+					<p class="display text-2xl">{space.child.name}</p>
 				</div>
-			{/if}
-		</section>
+			</header>
 
-		{#if space.grants.length > 0}
-			<section class="card mt-4">
-				<h2 class="mb-2">Accordé par tes parents</h2>
-				<ul class="space-y-2">
-					{#each space.grants as grant (grant.id)}
-						<li class="flex items-center justify-between gap-3 text-sm">
-							<span>{targetIcon(grant.target, [])} {targetLabel(grant.target, space.blocked_services.map((s) => ({ ...s, domains: [] })))}</span>
-							<span class="muted">
-								{grant.target.kind === 'extra_minutes' ? "aujourd'hui" : `encore ${until(grant.expires_at, space.now)}`}
-							</span>
-						</li>
-					{/each}
-				</ul>
+			<!-- Le cadran : la journée, les plages permises, le temps restant. -->
+			<section class="mt-6 flex flex-col items-center text-center">
+				<Dial size={dial} ranges={space.today_ranges} now={minute} {remaining} open={status.open} low={status.open && (status.remaining_minutes ?? 99) <= 5} labels>
+					{#if status.open}
+						{#if status.remaining_minutes === null}
+							<span class="display text-5xl">Libre</span>
+						{:else}
+							<span class="display text-[3rem]">{minutes(status.remaining_minutes)}</span>
+							<span class="muted mt-1">{status.remaining_minutes > 1 ? 'restantes' : 'restante'}</span>
+						{/if}
+					{:else if status.reason === 'paused'}
+						<Pause size={56} />
+					{:else}
+						<Moon size={56} />
+					{/if}
+				</Dial>
+
+				<h1 class="mt-5 text-[1.9rem]">
+					{#if status.open}{line}{:else}{CLOSED[status.reason ?? 'daily_quota']}{/if}
+				</h1>
+				<p class="muted mt-1.5">
+					{#if !status.open && status.reason === 'outside_schedule' && opening(space.next_opening)}
+						Tu pourras reprendre {opening(space.next_opening)}.
+					{:else if status.quota_today_minutes}
+						Tu as utilisé {seconds(space.used_today_seconds)} sur {minutes(status.quota_today_minutes)} aujourd'hui.
+					{:else}
+						Tu as utilisé {seconds(space.used_today_seconds)} aujourd'hui.
+					{/if}
+				</p>
 			</section>
-		{/if}
 
-		{#if space.allow_requests}
-			<section class="card mt-4 space-y-4">
-				<div>
-					<h2>Demander à tes parents</h2>
-					<p class="muted">Ils reçoivent ta demande et décident.</p>
+			<!-- Le bouclier : ce que le filtre fait pour lui. -->
+			<section class="panel mt-7 flex items-center gap-4">
+				<Shield size={64} opened={opened.length > 0}>
+					<span class="display text-lg">{blocked}</span>
+				</Shield>
+				<div class="min-w-0">
+					<p class="font-semibold">Ton filtre est actif</p>
+					<p class="muted text-sm">
+						{#if blocked === 0}Rien n'a été bloqué aujourd'hui.{:else}{blocked} {blocked > 1 ? 'sites bloqués' : 'site bloqué'} aujourd'hui.{/if}
+					</p>
 				</div>
+			</section>
 
+			{#if space.grants.length > 0}
+				<section class="panel mt-3">
+					<h3>Tes parents t'ont accordé</h3>
+					<div class="rows mt-1">
+						{#each space.grants.filter((g) => g.target.kind !== 'pause') as grant (grant.id)}
+							<div class="row min-h-12 justify-between py-1.5">
+								<span class="font-semibold">{targetLabel(grant.target, space.blocked_services)}</span>
+								<span class="muted text-sm">{grantRemaining(grant, space.now)}</span>
+							</div>
+						{/each}
+					</div>
+				</section>
+			{/if}
+
+			{#if space.allow_requests}
+				<section class="mt-7">
+					<h2 class="mb-3">Demander à tes parents</h2>
+					<div class="grid gap-2">
+						<button class="btn-primary min-h-16 justify-start px-5 text-lg" disabled={!!preview} onclick={() => (timeOpen = true)}>
+							<Clock size={24} /> Plus de temps
+						</button>
+						<button class="btn-quiet bg-surface min-h-16 justify-start px-5 text-lg" disabled={!!preview} onclick={() => (siteOpen = true)}>
+							<LockOpen size={24} /> Ouvrir un site ou une appli
+						</button>
+					</div>
+
+					{#if space.requests.length > 0}
+						<div class="rows panel mt-3 py-1">
+							{#each space.requests as request (request.id)}
+								<div class="row min-h-12 justify-between">
+									<span class="min-w-0 truncate">
+										{request.label}{#if request.minutes}, {minutes(request.minutes)}{/if}
+									</span>
+									<span class={STATUS_TAG[request.status]}>{STATUS[request.status]}</span>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</section>
+			{/if}
+
+			<details class="panel group mt-7">
+				<summary class="flex list-none items-center justify-between gap-3 font-semibold [&::-webkit-details-marker]:hidden">
+					Ce que tes parents voient
+					<ChevronDown size={20} class="text-muted transition-transform group-open:rotate-180" />
+				</summary>
+				<div class="mt-4 space-y-6">
+					<p class="muted">
+						Ils voient ton temps d'écran et le nom des sites. Rien d'autre : ni les pages, ni tes messages, ni tes
+						recherches. Tu vois ici la même chose qu'eux.
+					</p>
+					<div>
+						<h3 class="mb-2">Ton temps d'écran cette semaine</h3>
+						<WeekChart days={space.activity.days} quota={status.quota_today_minutes} />
+					</div>
+					{#if space.activity.top_domains.length > 0}
+						<div>
+							<h3 class="mb-2">Les sites que tu utilises le plus</h3>
+							<p class="leading-relaxed">{space.activity.top_domains.slice(0, 10).map((d) => d.domain).join(', ')}</p>
+						</div>
+					{/if}
+					{#if space.activity.blocked.length > 0}
+						<div>
+							<h3 class="mb-2">Les sites qui ont été bloqués</h3>
+							<p class="leading-relaxed">{space.activity.blocked.slice(0, 10).map((d) => d.domain).join(', ')}</p>
+						</div>
+					{/if}
+				</div>
+			</details>
+
+			<About />
+		{/if}
+	</div>
+
+	<Sheet bind:open={timeOpen} title="Demander plus de temps">
+		<div class="space-y-4">
+			<div>
+				<label class="label" for="time-message">Un mot pour tes parents, si tu veux</label>
+				<input id="time-message" class="field" bind:value={message} maxlength="200" placeholder="Je finis mon exposé" />
+			</div>
+			<div class="grid grid-cols-3 gap-2">
+				{#each [15, 30, 60] as m (m)}
+					<button class="btn-sun display min-h-16 text-xl" disabled={busy} onclick={() => send({ kind: 'extra_minutes', minutes: m })}>
+						+{minutes(m)}
+					</button>
+				{/each}
+			</div>
+		</div>
+	</Sheet>
+
+	<Sheet bind:open={siteOpen} title="Demander une ouverture">
+		{#if space}
+			<div class="space-y-5">
 				<div>
-					<p class="label">Plus de temps</p>
-					<div class="flex flex-wrap gap-2">
-						{#each [15, 30, 60] as m (m)}
-							<button
-								class="btn-soft"
-								disabled={!!preview}
-								onclick={() => openAsk(`Demander ${minutes(m)} de plus`, { kind: 'extra_minutes', minutes: m }, false)}
-							>
-								⏱️ +{minutes(m)}
+					<p class="label">Pendant combien de temps ?</p>
+					<Segmented
+						bind:value={askMinutes}
+						label="Durée demandée"
+						options={[
+							{ value: 15, label: '15 min' },
+							{ value: 30, label: '30 min' },
+							{ value: 60, label: '1 h' },
+							{ value: 120, label: '2 h' }
+						]}
+					/>
+				</div>
+				<div>
+					<label class="label" for="site-message">Un mot pour tes parents, si tu veux</label>
+					<input id="site-message" class="field" bind:value={message} maxlength="200" placeholder="Pour parler avec Tom" />
+				</div>
+				{#if space.blocked_services.length > 0}
+					<div class="rows">
+						{#each space.blocked_services as service (service.id)}
+							<button class="row justify-between" disabled={busy} onclick={() => send({ kind: 'service', service: service.id }, askMinutes)}>
+								<span class="font-semibold">{service.label}</span>
+								<span class="muted text-sm">Demander</span>
 							</button>
 						{/each}
 					</div>
-				</div>
-
-				{#if space.blocked_services.length > 0}
-					<div>
-						<p class="label">Ouvrir un service</p>
-						<div class="grid grid-cols-2 gap-2">
-							{#each space.blocked_services as service (service.id)}
-								<button
-									class="btn-ghost justify-start border border-slate-200 dark:border-slate-700"
-									disabled={!!preview}
-									onclick={() => openAsk(`Demander ${service.label}`, { kind: 'service', service: service.id })}
-								>
-									<span>{service.icon}</span>{service.label}
-								</button>
-							{/each}
-						</div>
-					</div>
 				{/if}
-
 				<form
 					onsubmit={(e) => {
 						e.preventDefault();
-						if (site.trim()) openAsk(`Demander ${site.trim()}`, { kind: 'domain', domain: site.trim() });
+						if (site.trim()) send({ kind: 'domain', domain: site.trim() }, askMinutes);
 					}}
 				>
-					<label class="label" for="site">Un site bloqué</label>
+					<label class="label" for="site">Un autre site</label>
 					<div class="flex gap-2">
-						<input id="site" class="input" placeholder="exemple.fr" bind:value={site} autocomplete="off" />
-						<button class="btn-soft" disabled={!!preview || !site.trim()}>Demander</button>
+						<input id="site" class="field" placeholder="exemple.fr" bind:value={site} autocomplete="off" autocapitalize="off" inputmode="url" />
+						<button class="btn-primary shrink-0" disabled={busy || !site.trim()}>Demander</button>
 					</div>
 				</form>
-
-				{#if space.requests.length > 0}
-					<div>
-						<p class="label">Tes demandes{pending > 0 ? ` (${pending} en attente)` : ''}</p>
-						<ul class="space-y-1.5">
-							{#each space.requests as request (request.id)}
-								<li class="flex items-center justify-between gap-3 text-sm">
-									<span class="truncate">
-										{request.label}{#if request.minutes}&nbsp;· {minutes(request.minutes)}{/if}
-									</span>
-									<span class="chip shrink-0">{STATUS_LABEL[request.status]}</span>
-								</li>
-							{/each}
-						</ul>
-					</div>
-				{/if}
-			</section>
+			</div>
 		{/if}
-
-		<details class="card mt-4">
-			<summary class="font-semibold">👀 Ce que tes parents voient</summary>
-			<div class="mt-4 space-y-5">
-				<p class="muted">
-					Tes parents voient ton temps d'écran et le nom des sites, rien de plus : ni les pages, ni tes messages,
-					ni tes recherches. Tu vois ici exactement la même chose qu'eux.
-				</p>
-				<div>
-					<p class="label">Ton temps d'écran cette semaine</p>
-					<WeekChart days={space.activity.days} quota={status.quota_today_minutes} {color} />
-				</div>
-				{#if space.activity.top_domains.length > 0}
-					<div>
-						<p class="label">Les sites que tu utilises le plus</p>
-						<div class="flex flex-wrap gap-2">
-							{#each space.activity.top_domains.slice(0, 10) as d (d.domain)}
-								<span class="chip">{d.domain}</span>
-							{/each}
-						</div>
-					</div>
-				{/if}
-				{#if space.activity.blocked.length > 0}
-					<div>
-						<p class="label">Les sites qui ont été bloqués</p>
-						<div class="flex flex-wrap gap-2">
-							{#each space.activity.blocked.slice(0, 10) as d (d.domain)}
-								<span class="chip">{d.domain} · {d.blocked}×</span>
-							{/each}
-						</div>
-					</div>
-				{/if}
-			</div>
-		</details>
-	{/if}
-	<About />
+	</Sheet>
 </div>
-
-<Modal bind:open={askOpen} title={ask?.title ?? ''}>
-	{#if ask}
-		<div class="space-y-4">
-			{#if ask.timed}
-				<div>
-					<p class="label">Pendant combien de temps ?</p>
-					<div class="flex flex-wrap gap-2">
-						{#each [15, 30, 60, 120] as m (m)}
-							<button class={askMinutes === m ? 'btn-primary btn-sm' : 'btn-soft btn-sm'} onclick={() => (askMinutes = m)}>
-								{minutes(m)}
-							</button>
-						{/each}
-					</div>
-				</div>
-			{/if}
-			<div>
-				<label class="label" for="ask-message">Un mot pour tes parents (facultatif)</label>
-				<input id="ask-message" class="input" bind:value={askMessage} maxlength="200" placeholder="C'est pour…" />
-			</div>
-			<button class="btn-primary w-full" disabled={busy} onclick={send}>Envoyer la demande</button>
-		</div>
-	{/if}
-</Modal>

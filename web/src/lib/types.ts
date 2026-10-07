@@ -97,6 +97,8 @@ export type ChildSummary = {
 	status: AccessStatus;
 	used_today_seconds: number;
 	used_week_seconds: number;
+	today_ranges?: TimeRange[];
+	blocked_today?: number;
 	next_opening: Opening;
 	grants: Grant[];
 	blocked_services: string[];
@@ -107,6 +109,7 @@ export type Dashboard = {
 	children: ChildSummary[];
 	devices: Device[];
 	device_grants: Grant[];
+	device_blocked_today?: Record<string, number>;
 	requests: ChildRequest[];
 	alerts: Alert[];
 	blocklists: { updated_at: number; categories: number };
@@ -143,6 +146,7 @@ export type ChildSpace = {
 	allow_requests: boolean;
 	requests: ChildRequest[];
 	activity: Activity;
+	blocked_today?: number;
 	now: number;
 };
 

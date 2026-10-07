@@ -32,6 +32,7 @@ pub async fn dashboard(_: Parent, State(state): State<Shared>) -> ApiResult<Valu
     let grants = model::live_grants(&state.db).await?;
     let devices = list_devices(&state).await?;
     let now = Local::now();
+    let blocked = model::blocked_today(&state.db).await?;
 
     let mut children = Vec::new();
     for child in model::children(&state.db).await? {
@@ -70,6 +71,8 @@ pub async fn dashboard(_: Parent, State(state): State<Shared>) -> ApiResult<Valu
             "status": status,
             "used_today_seconds": seconds.0,
             "used_week_seconds": seconds.1,
+            "today_ranges": child.policy.schedule.ranges_for(now.weekday()),
+            "blocked_today": blocked.iter().filter(|(c, _, _)| *c == child.id).map(|(_, _, n)| n).sum::<i64>(),
             "next_opening": next.map(|(day, time)| json!({ "day": day.to_string(), "time": time.format("%H:%M").to_string() })),
             "grants": grants.iter().filter(|g| g.child_id.as_deref() == Some(child.id.as_str())).collect::<Vec<_>>(),
             "blocked_services": child.policy.filter.blocked_services,
@@ -82,6 +85,12 @@ pub async fn dashboard(_: Parent, State(state): State<Shared>) -> ApiResult<Valu
         "children": children,
         "devices": devices,
         "device_grants": grants.iter().filter(|g| g.device_id.is_some()).collect::<Vec<_>>(),
+        // Requêtes bloquées aujourd'hui sur les appareils partagés, par appareil.
+        "device_blocked_today": blocked
+            .iter()
+            .filter(|(child, _, _)| child.is_empty())
+            .map(|(_, device, n)| (device.clone(), *n))
+            .collect::<std::collections::BTreeMap<_, _>>(),
         "requests": pending_requests(&state).await?,
         "alerts": open_alerts(&state).await?,
         "blocklists": { "updated_at": manifest.updated_at, "categories": manifest.categories.len() },

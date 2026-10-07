@@ -3,25 +3,23 @@
 	import { page } from '$app/state';
 	import { api } from '#lib/api.ts';
 	import { attempt, catalog as loadCatalog } from '#lib/app.svelte.ts';
+	import Avatar from '#lib/components/Avatar.svelte';
 	import FilterEditor from '#lib/components/FilterEditor.svelte';
 	import ScheduleEditor from '#lib/components/ScheduleEditor.svelte';
-	import Toggle from '#lib/components/Toggle.svelte';
+	import Segmented from '#lib/components/Segmented.svelte';
+	import Switch from '#lib/components/Switch.svelte';
 	import WeekChart from '#lib/components/WeekChart.svelte';
 	import { minutes, seconds } from '#lib/format.ts';
 	import { scheduleValid } from '#lib/schedule.ts';
 	import type { Activity, Catalog, Child } from '#lib/types.ts';
+	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import Eye from '@lucide/svelte/icons/eye';
 
-	const EMOJIS = ['🦊', '🐼', '🦁', '🐙', '🦄', '🐢', '🐱', '🐶', '🚀', '⚽', '🎨', '🎸', '🌈', '🦖', '🧙', '🤖'];
 	const COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ec4899', '#0ea5e9', '#8b5cf6', '#ef4444', '#14b8a6'];
-	const TABS = [
-		{ id: 'activite', label: 'Activité' },
-		{ id: 'temps', label: 'Horaires et temps' },
-		{ id: 'filtres', label: 'Filtres' },
-		{ id: 'profil', label: 'Profil' }
-	] as const;
+	type Tab = 'activite' | 'temps' | 'filtre' | 'profil';
 
 	const id = $derived(page.params.id);
-	let tab = $state<(typeof TABS)[number]['id']>('activite');
+	let tab = $state<Tab>('activite');
 	let saved = $state<Child | null>(null);
 	let draft = $state<Child | null>(null);
 	let catalog = $state<Catalog | null>(null);
@@ -83,218 +81,176 @@
 	}
 
 	const maxAllowed = $derived(Math.max(1, ...(activity?.top_domains.map((d) => d.allowed) ?? [1])));
+	const blockedTotal = $derived(activity?.blocked.reduce((sum, b) => sum + b.blocked, 0) ?? 0);
 </script>
 
-{#if !draft || !saved}
-	<p class="muted">Chargement…</p>
-{:else}
-	<div class="space-y-5 pb-20">
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="flex items-center gap-3">
-				<a href="/" class="btn-ghost btn-sm" aria-label="Retour">←</a>
-				<span
-					class="flex h-12 w-12 items-center justify-center rounded-2xl text-2xl"
-					style:background="{draft.color}22"
-				>
-					{draft.emoji}
-				</span>
-				<div>
-					<h1>{saved.name}</h1>
-					{#if saved.birth_year}<p class="muted">{thisYear - saved.birth_year} ans</p>{/if}
-				</div>
+{#if draft && saved}
+	<div class="mx-auto max-w-2xl space-y-5 pb-24">
+		<div class="flex items-center gap-3">
+			<a href="/" class="icon-btn bg-surface" aria-label="Retour à l'accueil"><ArrowLeft size={22} /></a>
+			<Avatar name={draft.name} color={draft.color} size={52} />
+			<div class="min-w-0 flex-1">
+				<h1 class="truncate">{saved.name}</h1>
+				{#if saved.birth_year}<p class="muted text-sm">{thisYear - saved.birth_year} ans</p>{/if}
 			</div>
-			<a class="btn-soft" href="/moi?apercu={saved.id}" target="_blank" rel="noopener">👀 Voir son espace</a>
+			<a class="icon-btn bg-surface" href="/moi?apercu={saved.id}" target="_blank" rel="noopener" aria-label="Voir l'espace de {saved.name}" title="Voir son espace">
+				<Eye size={22} />
+			</a>
 		</div>
 
-		<div class="flex gap-1 overflow-x-auto rounded-full bg-slate-100 p-1 dark:bg-slate-900" role="tablist">
-			{#each TABS as t (t.id)}
-				<button
-					role="tab"
-					aria-selected={tab === t.id}
-					class="flex-1 rounded-full px-4 py-2 text-sm font-semibold whitespace-nowrap transition {tab === t.id
-						? 'bg-white shadow-sm dark:bg-slate-800'
-						: 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}"
-					onclick={() => (tab = t.id)}
-				>
-					{t.label}
-				</button>
-			{/each}
-		</div>
+		<Segmented
+			bind:value={tab}
+			label="Rubrique"
+			options={[
+				{ value: 'activite', label: 'Activité' },
+				{ value: 'temps', label: 'Temps' },
+				{ value: 'filtre', label: 'Filtre' },
+				{ value: 'profil', label: 'Profil' }
+			]}
+		/>
 
 		{#if tab === 'activite'}
-			<div class="card space-y-4">
-				<div class="flex items-center justify-between">
+			<section class="panel">
+				<div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<h2>Temps d'écran</h2>
-					<div class="flex gap-1">
-						{#each [7, 30] as span (span)}
-							<button class={days === span ? 'btn-soft btn-sm' : 'btn-ghost btn-sm'} onclick={() => (days = span)}>
-								{span} jours
-							</button>
-						{/each}
+					<div class="sm:w-48">
+						<Segmented
+							bind:value={days}
+							label="Période"
+							options={[
+								{ value: 7, label: '7 jours' },
+								{ value: 30, label: '30 jours' }
+							]}
+						/>
 					</div>
 				</div>
 				{#if activity}
-					<WeekChart days={activity.days} quota={saved.policy.quota.daily_minutes} color={saved.color} />
+					<WeekChart days={activity.days} quota={saved.policy.quota.daily_minutes} />
 					{#if activity.devices.length > 1}
-						<div class="flex flex-wrap gap-2">
+						<div class="rows border-line mt-4 border-t">
 							{#each activity.devices as device (device.id)}
-								<span class="chip">{device.name} · {seconds(device.seconds)}</span>
+								<div class="row min-h-12 justify-between py-1">
+									<span>{device.name}</span>
+									<span class="display text-lg">{seconds(device.seconds)}</span>
+								</div>
 							{/each}
 						</div>
 					{/if}
 				{/if}
-			</div>
+			</section>
 
-			<div class="grid gap-4 md:grid-cols-2">
-				<div class="card">
-					<h2>Sites les plus consultés</h2>
-					<p class="muted mb-3 text-xs">Par nombre de requêtes, sur {days} jours. Les pages visitées ne sont pas enregistrées.</p>
-					{#if activity && activity.top_domains.length > 0}
-						<ul class="space-y-1.5">
-							{#each activity.top_domains.slice(0, 12) as site (site.domain)}
-								<li class="relative overflow-hidden rounded-lg px-2 py-1 text-sm">
-									<span
-										class="absolute inset-y-0 left-0 rounded-lg opacity-15"
-										style:width="{(site.allowed / maxAllowed) * 100}%"
-										style:background={saved.color}
-									></span>
-									<span class="relative flex justify-between gap-2">
-										<span class="truncate">{site.domain}</span>
-										<span class="muted text-xs tabular-nums">{site.allowed}</span>
-									</span>
-								</li>
-							{/each}
-						</ul>
-					{:else}
-						<p class="muted">Rien à afficher pour l'instant.</p>
-					{/if}
-				</div>
+			<section class="panel">
+				<h2>Ce que le filtre a bloqué</h2>
+				<p class="muted mb-2 text-sm">
+					{#if blockedTotal > 0}{blockedTotal} tentatives sur {days} jours, avec le motif.{:else}Rien sur {days} jours.{/if}
+				</p>
+				{#if activity && activity.blocked.length > 0}
+					<div class="rows">
+						{#each activity.blocked.slice(0, 12) as site (site.domain)}
+							<div class="row min-h-12 py-1.5">
+								<span class="min-w-0 flex-1">
+									<span class="block truncate font-semibold">{site.domain}</span>
+									{#if reasonLabel(site.reason)}<span class="muted block text-sm">{reasonLabel(site.reason)}</span>{/if}
+								</span>
+								<span class="display text-lg">{site.blocked}</span>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</section>
 
-				<div class="card">
-					<h2>Tentatives bloquées</h2>
-					<p class="muted mb-3 text-xs">Sites que le filtre a refusés, avec le motif.</p>
-					{#if activity && activity.blocked.length > 0}
-						<ul class="space-y-1.5">
-							{#each activity.blocked.slice(0, 12) as site (site.domain)}
-								<li class="flex items-center justify-between gap-2 px-2 py-1 text-sm">
+			<section class="panel">
+				<h2>Sites consultés</h2>
+				<p class="muted mb-3 text-sm">Le nom des sites seulement. Ni les pages, ni les recherches ne sont enregistrées.</p>
+				{#if activity && activity.top_domains.length > 0}
+					<ul class="space-y-2.5">
+						{#each activity.top_domains.slice(0, 12) as site (site.domain)}
+							<li>
+								<span class="flex items-baseline justify-between gap-3 text-[0.95rem]">
 									<span class="truncate">{site.domain}</span>
-									<span class="flex shrink-0 items-center gap-2">
-										{#if reasonLabel(site.reason)}<span class="chip">{reasonLabel(site.reason)}</span>{/if}
-										<span class="muted text-xs tabular-nums">{site.blocked}×</span>
-									</span>
-								</li>
-							{/each}
-						</ul>
-					{:else}
-						<p class="muted">Aucune tentative bloquée.</p>
-					{/if}
-				</div>
-			</div>
+									<span class="muted text-sm tabular-nums">{site.allowed}</span>
+								</span>
+								<span class="bg-sunken mt-1 block h-1.5 overflow-hidden rounded-full">
+									<span class="bg-ink block h-full rounded-full" style:width="{(site.allowed / maxAllowed) * 100}%"></span>
+								</span>
+							</li>
+						{/each}
+					</ul>
+				{:else}
+					<p class="muted">Rien à afficher pour l'instant.</p>
+				{/if}
+			</section>
 		{:else if tab === 'temps'}
-			<div class="card space-y-4">
-				<h2>Temps d'écran</h2>
-				<Toggle
-					checked={draft.policy.quota.daily_minutes !== null}
-					label="Limiter le temps par jour"
-					description="Le temps est partagé entre tous ses appareils."
-					onchange={(on) => (draft!.policy.quota.daily_minutes = on ? 90 : null)}
-				/>
-				{#if draft.policy.quota.daily_minutes !== null}
-					<div class="flex items-center gap-4">
-						<input
-							type="range"
-							min="15"
-							max="360"
-							step="15"
-							class="accent-brand-500 flex-1"
-							aria-label="Minutes par jour"
-							bind:value={draft.policy.quota.daily_minutes}
+			<section class="panel">
+				<h2 class="mb-1">Temps d'écran</h2>
+				<div class="rows">
+					<div>
+						<Switch
+							checked={draft.policy.quota.daily_minutes !== null}
+							label="Limiter le temps par jour"
+							description="Partagé entre tous ses appareils."
+							onchange={(on) => (draft!.policy.quota.daily_minutes = on ? 90 : null)}
 						/>
-						<span class="w-20 text-right text-lg font-bold tabular-nums">{minutes(draft.policy.quota.daily_minutes)}</span>
+						{#if draft.policy.quota.daily_minutes !== null}
+							<div class="pb-4">
+								<p class="display mb-2 text-4xl">{minutes(draft.policy.quota.daily_minutes)}</p>
+								<input type="range" min="15" max="360" step="15" class="w-full accent-[var(--sun)]" aria-label="Minutes par jour" bind:value={draft.policy.quota.daily_minutes} />
+							</div>
+						{/if}
 					</div>
-				{/if}
-				<Toggle
-					checked={draft.policy.quota.weekly_minutes !== null}
-					label="Limiter aussi le temps par semaine"
-					description="Du lundi au dimanche."
-					onchange={(on) => (draft!.policy.quota.weekly_minutes = on ? 600 : null)}
-				/>
-				{#if draft.policy.quota.weekly_minutes !== null}
-					<div class="flex items-center gap-4">
-						<input
-							type="range"
-							min="60"
-							max="2400"
-							step="30"
-							class="accent-brand-500 flex-1"
-							aria-label="Minutes par semaine"
-							bind:value={draft.policy.quota.weekly_minutes}
+					<div>
+						<Switch
+							checked={draft.policy.quota.weekly_minutes !== null}
+							label="Limiter aussi le temps par semaine"
+							description="Du lundi au dimanche."
+							onchange={(on) => (draft!.policy.quota.weekly_minutes = on ? 600 : null)}
 						/>
-						<span class="w-20 text-right text-lg font-bold tabular-nums">{minutes(draft.policy.quota.weekly_minutes)}</span>
+						{#if draft.policy.quota.weekly_minutes !== null}
+							<div class="pb-4">
+								<p class="display mb-2 text-4xl">{minutes(draft.policy.quota.weekly_minutes)}</p>
+								<input type="range" min="60" max="2400" step="30" class="w-full accent-[var(--sun)]" aria-label="Minutes par semaine" bind:value={draft.policy.quota.weekly_minutes} />
+							</div>
+						{/if}
 					</div>
-				{/if}
-			</div>
-
-			<div class="card space-y-3">
-				<div>
-					<h2>Horaires autorisés</h2>
-					<p class="muted">
-						En dehors de ces plages, la session se verrouille après un préavis de 5 minutes puis d'une minute.
-					</p>
 				</div>
+			</section>
+
+			<section class="panel">
+				<h2>Horaires</h2>
+				<p class="muted mb-2 text-sm">En dehors de ces plages, la session se verrouille, après un rappel à 5 minutes puis à 1 minute.</p>
 				<ScheduleEditor bind:schedule={draft.policy.schedule} />
-			</div>
-		{:else if tab === 'filtres'}
-			<div class="card space-y-4">
-				<Toggle
+			</section>
+		{:else if tab === 'filtre'}
+			<section class="panel py-2">
+				<Switch
 					bind:checked={draft.policy.filter.allow_requests}
 					label="{saved.name} peut faire des demandes"
-					description="Depuis son espace : débloquer un service ou un site, obtenir du temps en plus. Vous validez depuis l'accueil."
+					description="Depuis son espace : ouvrir un service ou un site, obtenir du temps. Vous répondez depuis l'accueil."
 				/>
-			</div>
-			<div class="card">
+			</section>
+			<section class="panel">
 				{#if catalog}
 					<FilterEditor bind:filter={draft.policy.filter} {catalog} />
-				{:else}
-					<p class="muted">Chargement du catalogue…</p>
 				{/if}
-			</div>
+			</section>
 		{:else}
-			<div class="card space-y-4">
+			<section class="panel space-y-5">
 				<div class="grid gap-4 sm:grid-cols-2">
 					<div>
 						<label class="label" for="name">Prénom</label>
-						<input id="name" class="input" bind:value={draft.name} maxlength="40" />
+						<input id="name" class="field" bind:value={draft.name} maxlength="40" />
 					</div>
 					<div>
 						<label class="label" for="year">Année de naissance</label>
-						<input id="year" type="number" class="input" bind:value={draft.birth_year} min={thisYear - 25} max={thisYear} />
-					</div>
-				</div>
-				<div>
-					<p class="label">Avatar</p>
-					<div class="flex flex-wrap gap-2">
-						{#each EMOJIS as emoji (emoji)}
-							<button
-								class="h-11 w-11 rounded-2xl text-2xl transition {draft.emoji === emoji
-									? 'bg-brand-100 ring-brand-500 dark:bg-brand-900/50 ring-2'
-									: 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800'}"
-								aria-pressed={draft.emoji === emoji}
-								onclick={() => (draft!.emoji = emoji)}
-							>
-								{emoji}
-							</button>
-						{/each}
+						<input id="year" type="number" inputmode="numeric" class="field" bind:value={draft.birth_year} min={thisYear - 25} max={thisYear} />
 					</div>
 				</div>
 				<div>
 					<p class="label">Couleur</p>
-					<div class="flex flex-wrap gap-2">
+					<div class="flex flex-wrap gap-3">
 						{#each COLORS as color (color)}
 							<button
-								class="h-9 w-9 rounded-full transition {draft.color === color
-									? 'ring-2 ring-slate-900 ring-offset-2 dark:ring-white dark:ring-offset-slate-900'
-									: ''}"
+								class="h-12 w-12 rounded-2xl transition-transform {draft.color === color ? 'scale-110 outline-3 outline-offset-2 outline-[var(--ink)]' : ''}"
 								style:background={color}
 								aria-label="Couleur {color}"
 								aria-pressed={draft.color === color}
@@ -303,29 +259,29 @@
 						{/each}
 					</div>
 				</div>
-			</div>
+			</section>
 
-			<div class="card border-rose-200 dark:border-rose-900/60">
+			<section class="panel">
 				<h2>Supprimer {saved.name}</h2>
-				<p class="muted mb-3">Ses réglages, son historique et ses rattachements d'appareils seront effacés.</p>
+				<p class="muted mt-1 mb-4 text-sm">Ses réglages, son historique et ses rattachements d'appareils seront effacés.</p>
 				{#if confirmDelete}
-					<div class="flex gap-2">
-						<button class="btn-danger" onclick={remove}>Oui, supprimer définitivement</button>
-						<button class="btn-ghost" onclick={() => (confirmDelete = false)}>Annuler</button>
+					<div class="grid gap-2 sm:grid-cols-2">
+						<button class="btn-danger" onclick={remove}>Supprimer définitivement</button>
+						<button class="btn-quiet" onclick={() => (confirmDelete = false)}>Annuler</button>
 					</div>
 				{:else}
-					<button class="btn-danger" onclick={() => (confirmDelete = true)}>Supprimer…</button>
+					<button class="btn-danger" onclick={() => (confirmDelete = true)}>Supprimer</button>
 				{/if}
-			</div>
+			</section>
 		{/if}
 	</div>
 
 	{#if dirty}
-		<div class="fixed inset-x-0 bottom-20 z-30 flex justify-center px-4 sm:bottom-6">
-			<div class="flex items-center gap-3 rounded-full bg-slate-900 py-2 pr-2 pl-5 text-white shadow-xl dark:bg-slate-700">
-				<span class="text-sm">{valid ? 'Modifications non enregistrées' : 'Une plage horaire est invalide'}</span>
-				<button class="btn btn-sm text-slate-300 hover:text-white" onclick={cancel}>Annuler</button>
-				<button class="btn-primary btn-sm" disabled={!valid} onclick={save}>Enregistrer</button>
+		<div class="fixed inset-x-0 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-30 px-3 sm:bottom-6">
+			<div class="sheet bg-night mx-auto flex max-w-md items-center gap-2 rounded-[22px] p-2 pl-4 text-white shadow-xl">
+				<span class="min-w-0 flex-1 text-sm font-semibold">{valid ? 'Modifications à enregistrer' : 'Une plage horaire est invalide'}</span>
+				<button class="btn btn-sm text-white/70 hover:text-white" onclick={cancel}>Annuler</button>
+				<button class="btn-sun btn-sm" disabled={!valid} onclick={save}>Enregistrer</button>
 			</div>
 		</div>
 	{/if}

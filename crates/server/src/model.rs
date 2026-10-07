@@ -128,6 +128,18 @@ pub async fn usage_seconds(
     Ok(row)
 }
 
+/// Nombre de requêtes bloquées aujourd'hui, par enfant (`''` = appareils partagés)
+/// et par appareil : la mesure du filtrage affichée à côté du temps d'écran.
+pub async fn blocked_today(db: &SqlitePool) -> Result<Vec<(String, String, i64)>> {
+    let rows = sqlx::query_as(
+        "SELECT child_id, device_id, SUM(blocked) FROM dns_daily WHERE day = ? GROUP BY child_id, device_id",
+    )
+    .bind(util::day_str(util::today()))
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
+}
+
 pub fn usage_from_seconds((today, week): (i64, i64)) -> Usage {
     Usage { today_minutes: (today / 60) as u32, week_minutes: (week / 60) as u32 }
 }

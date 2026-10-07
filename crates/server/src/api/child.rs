@@ -47,6 +47,12 @@ async fn space(state: &Shared, child_id: &str) -> Result<Value, ApiError> {
         .collect();
 
     let activity = super::children::activity_for(state, "child_id", child_id, 7).await?;
+    let blocked_today: i64 = model::blocked_today(&state.db)
+        .await?
+        .iter()
+        .filter(|(c, _, _)| c == child_id)
+        .map(|(_, _, n)| n)
+        .sum();
 
     Ok(json!({
         "child": { "id": child.id, "name": child.name, "emoji": child.emoji, "color": child.color },
@@ -59,6 +65,7 @@ async fn space(state: &Shared, child_id: &str) -> Result<Value, ApiError> {
         "allow_requests": child.policy.filter.allow_requests,
         "requests": requests.into_iter().map(request_json).collect::<Vec<_>>(),
         "activity": activity,
+        "blocked_today": blocked_today,
         "now": util::now(),
     }))
 }
