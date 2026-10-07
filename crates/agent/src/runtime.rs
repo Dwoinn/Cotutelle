@@ -89,6 +89,17 @@ impl Runtime {
     }
 }
 
+/// Nom d'hôte du serveur, extrait de son adresse (`http://hôte:port/…`).
+fn server_host(server: &str) -> &str {
+    let rest = server.split_once("://").map_or(server, |(_, rest)| rest);
+    let authority = rest.split(['/', '?']).next().unwrap_or(rest);
+    match authority.strip_prefix('[') {
+        // Adresse IPv6 littérale : `[::1]:8080`.
+        Some(v6) => v6.split(']').next().unwrap_or(v6),
+        None => authority.rsplit_once(':').map_or(authority, |(host, _)| host),
+    }
+}
+
 impl Handler for Runtime {
     fn decide(&self, _client: IpAddr, name: &str) -> Decision {
         // Personne devant l'écran, ou un compte non géré (un parent) : pas de filtrage.
@@ -103,8 +114,12 @@ impl Handler for Runtime {
                 grants: &account.grants,
                 blocklists: &blocklists,
                 now: chrono::Utc::now(),
-                // Hors horaires, c'est le verrouillage de session qui s'applique (D4).
-                access_open: true,
+                // Accès fermé : la session est verrouillée (D4) et, en seconde
+                // barrière si le verrou ne tient pas, le DNS est coupé. Le
+                // serveur reste joignable pour apprendre la réouverture.
+                access_open: self.access(&account, chrono::Local::now()).open
+                    || cotutelle_common::normalize_domain(name)
+                        == server_host(&self.identity.server),
             },
         );
         let blocked = match &verdict {
@@ -126,5 +141,18 @@ impl Handler for Runtime {
         } else {
             configured
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::server_host;
+
+    #[test]
+    fn server_host_is_extracted_from_url() {
+        assert_eq!(server_host("http://cotutelle.local:8080"), "cotutelle.local");
+        assert_eq!(server_host("https://cotutelle.example/"), "cotutelle.example");
+        assert_eq!(server_host("http://192.168.1.10:8080/chemin"), "192.168.1.10");
+        assert_eq!(server_host("http://[fd00::1]:8080"), "fd00::1");
     }
 }

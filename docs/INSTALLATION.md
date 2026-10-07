@@ -43,10 +43,12 @@ cargo build --release -p cotutelle-server
 
 ## 2. L'agent, sur un ordinateur Linux
 
-Cible : Ubuntu avec systemd-resolved et GNOME. La protection système n'a pas
-encore été validée sur une vraie machine : faites le premier essai sur une
-machine de test. L'enfant doit utiliser un compte **sans droits
-d'administration**.
+Prérequis : systemd-resolved, nftables, et un compte **sans droits
+d'administration** pour l'enfant. Cible principale : Ubuntu avec GNOME.
+Essayé en réel sur Omarchy (Arch Linux, Hyprland) ; pas encore sur Ubuntu :
+faites le premier essai sur une machine de test.
+
+Sous Debian et Ubuntu :
 
 ```bash
 scripts/build-deb.sh
@@ -61,6 +63,10 @@ sudo cotutelle-agent enroll --server http://<adresse du serveur>:8080 --code XXX
 sudo systemctl enable --now cotutelle-agent
 ```
 
+Sous une autre distribution, copiez le binaire `cotutelle-agent` dans
+`/usr/bin` et `packaging/cotutelle-agent.service` dans `/etc/systemd/system`,
+puis suivez les mêmes étapes.
+
 De retour dans l'interface, indiquez quel compte de l'ordinateur appartient à
 quel enfant. Un compte laissé sur « Non filtré » n'est soumis à aucune règle :
 c'est le réglage des comptes parents.
@@ -73,11 +79,26 @@ L'enfant trouve « Mon temps d'écran » dans le menu de ses applications.
   résolveur local de l'agent.
 - Une table nftables `inet cotutelle` : seuls root et la boucle locale peuvent
   émettre du DNS vers l'extérieur.
-- Des politiques Firefox et Chromium désactivant leur DNS chiffré intégré.
-  Un fichier de politique Firefox déjà présent n'est jamais écrasé.
+- Des politiques désactivant le DNS chiffré intégré des navigateurs
+  installés (Firefox, Chromium, Chrome, Brave, Edge). Un fichier de politique
+  Firefox déjà présent n'est jamais écrasé.
 
 Tout est retiré par `sudo cotutelle-agent release`, exécuté automatiquement à
 l'arrêt du service et à la désinstallation.
+
+### Verrouillage selon le bureau
+
+GNOME et KDE verrouillent sur ordre de logind. Si votre bureau l'ignore,
+l'agent lance son verrou habituel (`omarchy-system-lock`, `hyprlock`,
+`swaylock`…). Pour en imposer un autre, ajoutez à l'unité systemd :
+
+```ini
+[Service]
+Environment=COTUTELLE_LOCK_COMMAND=mon-verrou --option
+```
+
+Si aucun verrou ne fonctionne, les parents reçoivent une alerte et le DNS du
+compte est coupé tant que l'accès reste fermé.
 
 ### Diagnostic
 

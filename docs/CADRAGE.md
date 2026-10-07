@@ -74,7 +74,7 @@ plusieurs : deux parents, plusieurs enfants, plusieurs appareils.
 | D1 | **Filtrage par DNS uniquement.** Blocage par domaine, jamais par page ou mot-clé. | Seul mécanisme portable sur tous les OS sans certificat racine. Tout est en HTTPS. |
 | D2 | **L'agent embarque son propre résolveur DNS et ses listes.** Le serveur distribue la politique, l'agent l'applique. | Permet le mode hors ligne et protège le laptop hors de la maison. |
 | D3 | **Hors ligne : dernière politique connue.** Jamais d'ouverture par défaut. | Un serveur éteint ne doit pas désactiver la protection. |
-| D4 | **Temps écoulé : verrouillage de session** (logind), préavis à 5 min et 1 min. | Ne détruit aucun travail en cours, réversible par un parent. |
+| D4 | **Temps écoulé : verrouillage de session** (logind, ou verrou du bureau s'il ignore logind), préavis à 5 min et 1 min. Le DNS du compte est coupé tant que l'accès est fermé, en seconde barrière. | Ne détruit aucun travail en cours, réversible par un parent. |
 | D5 | **Le serveur est aussi résolveur DNS du réseau local.** Appareils sans agent filtrés par adresse IP/MAC via un « profil appareil ». | Couvre la TV connectée, les consoles, les invités. Par défaut : politique la plus stricte de la maison. |
 | D6 | **Suivi niveaux 1 et 2 par défaut**, rétention 30 jours. Niveau 3 en mode diagnostic, rétention 48 h. Niveau 4 en phase 2, désactivable par enfant. Niveau 5 exclu. | Proportionné à 8 et 11 ans. Voir §8. |
 | D7 | **Transparence : l'enfant voit sur son tableau de bord ce que les parents voient de lui.** | Rend l'outil acceptable, évite qu'il devienne un défi. |
@@ -283,18 +283,37 @@ serveur : enrôlement, synchronisation, filtrage DNS local et LAN avec les
 vraies listes UT1, exceptions, pause, demandes, temps d'écran partagé entre
 appareils, fonctionnement hors ligne sur la dernière politique connue.
 
-**Non vérifié sur une vraie machine**, car cela demande les droits root et
-modifie le système : la mise en place de systemd-resolved et de nftables, le
-verrouillage réel d'une session, les notifications dans la session de
-l'enfant, l'installation du paquet `.deb`. Ce code est écrit et couvert par
-des tests unitaires sur ce qu'il génère, mais son premier essai doit se faire
-sur une machine de test ou une machine virtuelle.
+**Essai réel du 7 octobre 2026**, sur une machine virtuelle Omarchy 4 (Arch
+Linux, Hyprland, systemd-resolved, ufw), agent lancé en service root :
+
+- redirection de systemd-resolved et table nftables posées, filtrage effectif
+  par le résolveur système, DNS direct rejeté pour un compte ordinaire et
+  permis à root ;
+- exception accordée puis retirée, effective en deux secondes ;
+- notifications affichées dans la session ;
+- mise en pause depuis le serveur : session verrouillée par l'agent en moins
+  de six secondes, une seule notification, aucun réessai en rafale ;
+- arrêt du service en 0,1 s, `/etc`, DNS et pare-feu restitués à l'identique.
+
+Cet essai a révélé et fait corriger cinq défauts : une console série prise
+pour une session active ; l'ordre de verrouillage de logind ignoré par
+Hyprland ; l'état verrouillé inconnu de logind sous Hyprland ; un blocage
+mutuel à l'arrêt entre l'agent et systemd-resolved ; des répertoires créés
+puis supprimés à tort dans `/etc`.
+
+**Reste à vérifier** : tout le parcours sous Ubuntu et GNOME, l'installation
+du paquet `.deb`, l'image Docker.
 
 Limites assumées du MVP :
 
 - **Compte au premier plan** (D12) : quand un parent ouvre sa session sur
   l'ordinateur familial, les programmes de l'enfant restés en arrière-plan ne
   sont plus filtrés. Quand personne n'est devant l'écran, rien n'est filtré.
+  Cela vaut aussi quand l'écran est verrouillé : un téléchargement lancé
+  avant le verrouillage se poursuit sans filtrage.
+- **Verrouillage selon le bureau** : GNOME et KDE obéissent à logind. Pour
+  les autres, l'agent essaie le verrou du bureau (Omarchy, hyprlock,
+  swaylock) ; à défaut, il alerte les parents et coupe le DNS du compte.
 - **Pas de limitation des tentatives de connexion** à l'interface parents.
 - **HTTP en clair** sur le réseau local : mots de passe et cookies y circulent
   sans chiffrement. À placer derrière un proxy HTTPS dès que possible.

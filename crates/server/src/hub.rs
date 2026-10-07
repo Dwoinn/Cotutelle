@@ -282,6 +282,9 @@ async fn handle(
                 TamperKind::FirewallRulesMissing => "les règles réseau de protection ont disparu",
                 TamperKind::ClockChanged => "l'horloge a été modifiée",
                 TamperKind::AgentRestarted => "l'agent a redémarré de façon inattendue",
+                TamperKind::LockFailed => {
+                    "la session n'a pas pu être verrouillée alors que l'accès est fermé"
+                }
             };
             let message = if details.is_empty() {
                 format!("{name} : {what}")

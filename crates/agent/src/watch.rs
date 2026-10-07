@@ -18,6 +18,11 @@ const SAVE_EVERY: Duration = Duration::from_secs(30);
 const CHECK_EVERY: Duration = Duration::from_secs(60);
 /// Recul d'horloge toléré avant de le signaler.
 const CLOCK_TOLERANCE_SECONDS: i64 = 120;
+/// Tant que l'accès reste fermé, le message d'explication n'est pas répété
+/// plus souvent que cela, même si la session est rouverte entre-temps.
+const CLOSED_NOTICE_EVERY_SECONDS: i64 = 60;
+/// Nombre d'échecs de verrouillage consécutifs avant d'alerter les parents.
+const LOCK_FAILURES_BEFORE_ALERT: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -30,6 +35,8 @@ pub enum Action {
 pub struct Warned {
     five: bool,
     one: bool,
+    /// Dernier affichage du message « accès fermé ».
+    closed_notice: Option<DateTime<Local>>,
 }
 
 fn closed_message(reason: Option<ClosedReason>) -> (&'static str, &'static str) {
@@ -75,12 +82,23 @@ pub fn step(
         let memo = warned.entry(session.user.clone()).or_default();
 
         if !status.open {
-            let (title, body) = closed_message(status.reason);
-            actions.push(Action::Notify(session.clone(), title, body.to_string()));
+            // Le verrouillage est retenté à chaque pas tant que la session
+            // reste ouverte ; l'explication, elle, n'est pas répétée en rafale.
+            let recently = memo
+                .closed_notice
+                .is_some_and(|at| (now - at).num_seconds() < CLOSED_NOTICE_EVERY_SECONDS);
+            if !recently {
+                let (title, body) = closed_message(status.reason);
+                actions.push(Action::Notify(session.clone(), title, body.to_string()));
+            }
             actions.push(Action::Lock(session.clone()));
-            *memo = Warned::default();
+            *memo = Warned {
+                closed_notice: if recently { memo.closed_notice } else { Some(now) },
+                ..Default::default()
+            };
             continue;
         }
+        memo.closed_notice = None;
         match status.remaining_minutes {
             Some(m) if m <= 1 && !memo.one => {
                 memo.one = true;
@@ -107,7 +125,8 @@ pub fn step(
     actions
 }
 
-fn perform(rt: &Runtime, action: &Action) {
+/// Exécute une action ; rend `false` si elle a échoué.
+fn perform(rt: &Runtime, action: &Action) -> bool {
     let result = match action {
         Action::Lock(session) => {
             tracing::info!(user = %session.user, dry_run = rt.dry_run, "verrouillage de la session");
@@ -118,8 +137,39 @@ fn perform(rt: &Runtime, action: &Action) {
             if rt.dry_run { Ok(()) } else { rt.platform.notify(session, title, body) }
         }
     };
-    if let Err(e) = result {
+    if let Err(e) = &result {
         tracing::warn!(error = %e, "action impossible");
+    }
+    result.is_ok()
+}
+
+/// Suit les échecs de verrouillage par compte et alerte les parents quand un
+/// accès fermé ne peut pas être imposé. Une alerte par épisode.
+#[derive(Default)]
+struct LockWatch {
+    failures: HashMap<String, u32>,
+}
+
+impl LockWatch {
+    fn record(&mut self, rt: &Runtime, user: &str, locked: bool, now: DateTime<Local>) {
+        if locked {
+            self.failures.remove(user);
+            return;
+        }
+        let count = self.failures.entry(user.to_string()).or_default();
+        *count += 1;
+        if *count == LOCK_FAILURES_BEFORE_ALERT {
+            rt.queue(AgentMessage::Tamper {
+                kind: TamperKind::LockFailed,
+                at: now.to_utc(),
+                details: format!("compte {user}"),
+            });
+        }
+    }
+
+    /// Oublie les comptes qui n'ont plus besoin d'être verrouillés.
+    fn retain(&mut self, still_closed: &[String]) {
+        self.failures.retain(|user, _| still_closed.contains(user));
     }
 }
 
@@ -135,6 +185,7 @@ pub fn lock_account(rt: &Runtime, os_account: &str) {
 /// la protection DNS est active et doit être vérifiée périodiquement.
 pub async fn run(rt: Arc<Runtime>, enforced: Option<SocketAddr>) {
     let mut warned = HashMap::new();
+    let mut lock_watch = LockWatch::default();
     let mut last_tick = Instant::now();
     let mut last_save = Instant::now();
     let mut last_check = Instant::now();
@@ -163,9 +214,24 @@ pub async fn run(rt: Arc<Runtime>, enforced: Option<SocketAddr>) {
         };
         match sessions {
             Ok(Ok(sessions)) => {
-                for action in step(&rt, &sessions, elapsed, now, &mut warned) {
-                    perform(&rt, &action);
+                let actions = step(&rt, &sessions, elapsed, now, &mut warned);
+                // Verrouiller attend la confirmation du bureau : hors du fil asynchrone.
+                let outcomes = {
+                    let rt = rt.clone();
+                    tokio::task::spawn_blocking(move || {
+                        actions.into_iter().map(|a| (perform(&rt, &a), a)).collect::<Vec<_>>()
+                    })
+                    .await
+                    .unwrap_or_default()
+                };
+                let mut closed = Vec::new();
+                for (ok, action) in outcomes {
+                    if let Action::Lock(session) = action {
+                        lock_watch.record(&rt, &session.user, ok, now);
+                        closed.push(session.user);
+                    }
                 }
+                lock_watch.retain(&closed);
             }
             Ok(Err(e)) => tracing::warn!(error = %e, "lecture des sessions"),
             Err(e) => tracing::warn!(error = %e, "lecture des sessions"),
@@ -343,6 +409,41 @@ mod tests {
         assert!(
             step(&rt, &[session("louis", true, false)], 5, noon(), &mut HashMap::new()).is_empty()
         );
+    }
+
+    #[test]
+    fn closed_notice_is_not_repeated_while_lock_is_retried() {
+        let rt = runtime(60, vec![], 60);
+        let mut warned = HashMap::new();
+        let sessions = [session("louis", false, false)];
+        let first = step(&rt, &sessions, 5, noon(), &mut warned);
+        assert!(matches!(first.as_slice(), [Action::Notify(..), Action::Lock(_)]));
+        // La session est toujours ouverte cinq secondes plus tard : on
+        // reverrouille, sans réafficher le message.
+        let later = noon() + ChronoDuration::seconds(5);
+        let second = step(&rt, &sessions, 5, later, &mut warned);
+        assert!(matches!(second.as_slice(), [Action::Lock(_)]));
+        // Une minute après, l'enfant a rouvert sa session : on réexplique.
+        let much_later = noon() + ChronoDuration::seconds(70);
+        let third = step(&rt, &sessions, 5, much_later, &mut warned);
+        assert!(matches!(third.as_slice(), [Action::Notify(..), Action::Lock(_)]));
+    }
+
+    #[test]
+    fn lock_failures_alert_parents_once_per_episode() {
+        let rt = runtime(60, vec![], 60);
+        let mut watch = LockWatch::default();
+        for _ in 0..5 {
+            watch.record(&rt, "louis", false, noon());
+        }
+        let alerts = |rt: &Runtime| rt.outbox.lock().unwrap().len();
+        assert_eq!(alerts(&rt), 1);
+        // Verrou réussi puis nouvel échec prolongé : nouvel épisode, nouvelle alerte.
+        watch.record(&rt, "louis", true, noon());
+        for _ in 0..3 {
+            watch.record(&rt, "louis", false, noon());
+        }
+        assert_eq!(alerts(&rt), 2);
     }
 
     #[test]

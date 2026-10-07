@@ -62,6 +62,8 @@ pub enum TamperKind {
     FirewallRulesMissing,
     ClockChanged,
     AgentRestarted,
+    /// La session n'a pas pu être verrouillée alors que l'accès est fermé.
+    LockFailed,
 }
 
 /// Compteur de requêtes DNS pour un domaine sur une fenêtre de temps.
