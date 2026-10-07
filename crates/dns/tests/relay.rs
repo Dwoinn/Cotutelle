@@ -9,6 +9,41 @@ struct TestHandler {
     upstream: SocketAddr,
 }
 
+/// Relais dont les amonts sont donnés tels quels, sans filtrage.
+struct Chain(Vec<SocketAddr>);
+
+impl Handler for Chain {
+    fn decide(&self, _client: IpAddr, _name: &str) -> Decision {
+        Decision::Forward
+    }
+
+    fn upstreams(&self) -> Vec<SocketAddr> {
+        self.0.clone()
+    }
+}
+
+/// Faux amont qui ne connaît aucun nom.
+async fn nxdomain_upstream() -> SocketAddr {
+    let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let addr = socket.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 4096];
+        loop {
+            let (len, peer) = socket.recv_from(&mut buf).await.unwrap();
+            socket.send_to(&message::nxdomain(&buf[..len]).unwrap(), peer).await.unwrap();
+        }
+    });
+    addr
+}
+
+async fn chain(upstreams: Vec<SocketAddr>) -> SocketAddr {
+    let server =
+        DnsServer::bind("127.0.0.1:0".parse().unwrap(), Arc::new(Chain(upstreams))).await.unwrap();
+    let addr = server.local_addr().unwrap();
+    tokio::spawn(server.run());
+    addr
+}
+
 impl Handler for TestHandler {
     fn decide(&self, _client: IpAddr, name: &str) -> Decision {
         match name {
@@ -91,4 +126,19 @@ async fn unreachable_upstream_yields_no_address() {
     tokio::spawn(server.run());
     let reply = query_a(addr, "fr.wikipedia.test").await.unwrap();
     assert!(reply.addresses.is_empty());
+}
+
+#[tokio::test]
+async fn a_name_unknown_upstream_is_looked_up_on_the_next_one() {
+    // Cas d'un nom privé : le premier amont l'ignore, le suivant le connaît.
+    let relay = chain(vec![nxdomain_upstream().await, fake_upstream().await]).await;
+    let reply = query_a(relay, "serveur.prive.test").await.unwrap();
+    assert_eq!(reply.addresses, [IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7))]);
+}
+
+#[tokio::test]
+async fn a_name_unknown_everywhere_stays_nxdomain() {
+    let relay = chain(vec![nxdomain_upstream().await, nxdomain_upstream().await]).await;
+    let reply = query_a(relay, "inexistant.test").await.unwrap();
+    assert!(reply.nxdomain && reply.addresses.is_empty());
 }

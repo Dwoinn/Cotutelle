@@ -32,6 +32,8 @@ pub struct Runtime {
     pub foreground: RwLock<Option<String>>,
     /// Compteurs DNS par compte, vidés vers le serveur chaque minute.
     pub stats: Mutex<DnsStats<String>>,
+    /// Résolveurs annoncés par le réseau, rafraîchis périodiquement.
+    pub network_dns: RwLock<Vec<SocketAddr>>,
     /// Messages en attente d'envoi au serveur.
     pub outbox: Mutex<Vec<AgentMessage>>,
     pub connected: AtomicBool,
@@ -58,6 +60,15 @@ impl Runtime {
 
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Relaxed)
+    }
+
+    /// Relit les résolveurs du réseau. Une lecture vide (systemd-resolved en
+    /// cours de redémarrage) ne remplace pas la liste connue.
+    pub fn refresh_network_dns(&self) {
+        let servers = self.platform.network_dns();
+        if !servers.is_empty() {
+            *self.network_dns.write().expect("verrou DNS réseau") = servers;
+        }
     }
 
     pub fn queue(&self, message: AgentMessage) {
@@ -136,11 +147,21 @@ impl Handler for Runtime {
             .as_ref()
             .map(|s| s.upstream_dns.iter().filter_map(|u| u.parse().ok()).collect())
             .unwrap_or_default();
-        if configured.is_empty() {
+        let fallback: Vec<SocketAddr> = if configured.is_empty() {
             DEFAULT_UPSTREAMS.iter().filter_map(|u| u.parse().ok()).collect()
         } else {
             configured
+        };
+        // D'abord les DNS du réseau : eux seuls connaissent les noms privés
+        // (serveur Cotutelle en interne, NAS, portail captif). Les résolveurs
+        // configurés restent en secours. Le filtrage, lui, a déjà eu lieu.
+        let mut upstreams = self.network_dns.read().expect("verrou DNS réseau").clone();
+        for addr in fallback {
+            if !upstreams.contains(&addr) {
+                upstreams.push(addr);
+            }
         }
+        upstreams
     }
 }
 

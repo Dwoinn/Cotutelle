@@ -42,6 +42,9 @@ pub trait Platform: Send + Sync {
     /// Affiche un message dans la session de l'enfant.
     fn notify(&self, session: &Session, title: &str, body: &str) -> Result<()>;
 
+    /// Résolveurs DNS annoncés par le réseau (DHCP), hors boucle locale.
+    fn network_dns(&self) -> Vec<SocketAddr>;
+
     /// Force toutes les résolutions DNS vers le résolveur local de l'agent et
     /// bloque les sorties DNS directes.
     fn enforce_dns(&self, resolver: SocketAddr) -> Result<()>;

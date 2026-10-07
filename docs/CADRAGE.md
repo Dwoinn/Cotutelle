@@ -86,6 +86,7 @@ plusieurs : deux parents, plusieurs enfants, plusieurs appareils.
 | D13 | **Notifications aux parents par ntfy**, optionnelles. | Web Push exige HTTPS, incompatible avec un accès en HTTP sur le réseau local. |
 | D14 | **Le serveur envoie toujours l'état complet à l'agent**, jamais de delta. | La copie sur disque de l'agent est directement la dernière politique connue (D3). |
 | D15 | **Licence AGPL-3.0-or-later avec clause d'attribution** (article 7(b)) ; le nom Cotutelle est réservé au projet officiel. Pas de cession de droits des contributeurs, attestation d'origine seulement. | L'objectif est de protéger la paternité, pas un revenu : chacun peut réutiliser et même vendre, à condition de publier son code et de citer le projet. |
+| D16 | **L'agent relaie d'abord vers les DNS annoncés par le réseau**, puis vers les résolveurs configurés. Une réponse négative d'un amont fait essayer le suivant. | Seuls les DNS du réseau connaissent les noms privés : serveur Cotutelle interne, NAS, portail captif. Le filtrage ayant lieu avant le relais, ce choix ne l'affaiblit pas. |
 
 ## 6. Modèle de domaine
 
@@ -301,8 +302,14 @@ Hyprland ; l'état verrouillé inconnu de logind sous Hyprland ; un blocage
 mutuel à l'arrêt entre l'agent et systemd-resolved ; des répertoires créés
 puis supprimés à tort dans `/etc`.
 
+Le premier enrôlement contre un serveur en HTTPS, sous un nom de domaine
+privé, a révélé un sixième défaut : l'agent relayait tout vers des résolveurs
+publics, qui ignorent les noms privés, et ne retrouvait donc plus son propre
+serveur. Il relaie désormais d'abord vers les DNS annoncés par le réseau, les
+résolveurs configurés servant de secours (D16).
+
 **Reste à vérifier** : tout le parcours sous Ubuntu et GNOME, l'installation
-du paquet `.deb`, l'image Docker.
+du paquet `.deb`.
 
 Limites assumées du MVP :
 
@@ -319,6 +326,4 @@ Limites assumées du MVP :
   sans chiffrement. À placer derrière un proxy HTTPS dès que possible.
 - **Appareils sans agent** : reconnus à leur adresse IP, qui doit être fixe.
   Pas de décompte du temps, seulement des plages horaires.
-- **Réseaux à portail captif** (hôtel, train) : l'agent force ses propres
-  résolveurs, ce qui peut empêcher l'affichage du portail.
 - **Fuseau horaire** : le serveur et les appareils sont supposés dans le même.

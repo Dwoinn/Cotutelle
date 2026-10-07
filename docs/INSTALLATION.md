@@ -33,6 +33,11 @@ oc -n cotutelle start-build cotutelle-server --follow
 oc -n cotutelle get route cotutelle
 ```
 
+La route utilise le nom `cotutelle.infra.donovanwinter.fr`, avec un certificat
+Let's Encrypt émis et renouvelé par cert-manager. Adaptez ce nom et l'émetteur
+dans `deploy/openshift/network.yaml`, et faites pointer le nom, dans votre
+DNS, vers l'adresse du routeur du cluster.
+
 SQLite est intégré au binaire : il n'y a pas de base à déployer à côté,
 seulement un volume bloc de 2 Gio. Le déploiement garde un seul réplica en
 stratégie `Recreate`, car la base n'accepte qu'un écrivain. Une nouvelle

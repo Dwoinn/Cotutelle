@@ -239,6 +239,9 @@ pub async fn run(rt: Arc<Runtime>, enforced: Option<SocketAddr>) {
 
         if last_save.elapsed() >= SAVE_EVERY {
             last_save = Instant::now();
+            // Le réseau a pu changer (Wi-Fi, câble, retour à la maison).
+            let refresh = rt.clone();
+            let _ = tokio::task::spawn_blocking(move || refresh.refresh_network_dns()).await;
             let mut usage = rt.usage.lock().expect("verrou temps");
             usage.prune(now.date_naive());
             if let Err(e) = rt.paths.save_usage(&usage) {
@@ -292,6 +295,9 @@ mod tests {
         fn notify(&self, _: &Session, _: &str, _: &str) -> anyhow::Result<()> {
             Ok(())
         }
+        fn network_dns(&self) -> Vec<SocketAddr> {
+            vec![]
+        }
         fn enforce_dns(&self, _: SocketAddr) -> anyhow::Result<()> {
             Ok(())
         }
@@ -340,6 +346,7 @@ mod tests {
             usage: Default::default(),
             foreground: Default::default(),
             stats: Default::default(),
+            network_dns: Default::default(),
             outbox: Default::default(),
             connected: Default::default(),
         }

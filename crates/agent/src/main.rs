@@ -127,6 +127,7 @@ async fn run(
         loaded_lists: Default::default(),
         foreground: Default::default(),
         stats: Default::default(),
+        network_dns: Default::default(),
         outbox: Default::default(),
         connected: AtomicBool::new(false),
     });
@@ -144,6 +145,8 @@ async fn run(
         tokio::task::spawn_blocking(move || sync::load_blocklists(&rt, cached)).await?;
     }
 
+    // À lire avant de rediriger le DNS du système vers l'agent.
+    rt.refresh_network_dns();
     let dns = cotutelle_dns::DnsServer::bind(dns_addr, rt.clone()).await?;
     tracing::info!(addr = %dns_addr, platform = rt.platform.name(), dry_run, "agent Cotutelle démarré");
 

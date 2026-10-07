@@ -241,6 +241,34 @@ fn fallback_lock_script() -> String {
     format!("{attempts}exit 1")
 }
 
+/// Lit la sortie de `resolvectl dns` et rend les résolveurs des interfaces :
+///
+/// ```text
+/// Global: 127.0.0.1:5354
+/// Link 2 (enp1s0): 172.30.0.10
+/// Link 3 (enp2s0): 192.168.3.1 fe80::1%3
+/// ```
+///
+/// La ligne `Global` (c'est l'agent lui-même) et la boucle locale sont écartées.
+fn parse_resolvectl_dns(text: &str) -> Vec<SocketAddr> {
+    let mut servers = Vec::new();
+    for line in text.lines().filter(|l| l.trim_start().starts_with("Link ")) {
+        let Some((_, list)) = line.split_once("):") else { continue };
+        for entry in list.split_whitespace() {
+            // Forme `adresse`, `adresse:port` ou `adresse#nom` ; les adresses
+            // de portée lien (`%interface`) ne sont pas utilisables telles quelles.
+            let entry = entry.split('#').next().unwrap_or(entry);
+            let parsed = entry.parse::<SocketAddr>().ok().or_else(|| {
+                entry.parse::<std::net::IpAddr>().ok().map(|ip| SocketAddr::new(ip, 53))
+            });
+            if let Some(addr) = parsed.filter(|a| !a.ip().is_loopback() && !servers.contains(a)) {
+                servers.push(addr);
+            }
+        }
+    }
+    servers
+}
+
 /// Comptes humains de `/etc/passwd` : UID 1000 à 59999 avec un vrai shell.
 fn parse_passwd(passwd: &str) -> Vec<String> {
     passwd
@@ -401,6 +429,10 @@ impl Platform for Linux {
         .map(drop)
     }
 
+    fn network_dns(&self) -> Vec<SocketAddr> {
+        run("resolvectl", &["dns"]).map(|out| parse_resolvectl_dns(&out)).unwrap_or_default()
+    }
+
     fn enforce_dns(&self, resolver: SocketAddr) -> Result<()> {
         write_if_ours(RESOLVED_DROPIN, &resolved_dropin(resolver))?;
         restart_resolved()?;
@@ -521,6 +553,22 @@ mod tests {
         let swaylock = script.find("command -v swaylock").unwrap();
         assert!(omarchy < swaylock && script.ends_with("exit 1"));
         assert!(script.contains("(swaylock -f >/dev/null 2>&1 &)"));
+    }
+
+    #[test]
+    fn network_dns_is_read_from_resolvectl() {
+        // Sortie relevée sur une vraie machine, agent actif.
+        let text = "Global: 127.0.0.1:5354\n\
+                    Link 3 (enp2s0): 192.168.3.1\n\
+                    Link 2 (enp1s0): 172.30.0.10 192.168.3.1 9.9.9.9#dns.quad9.net fe80::1%3\n\
+                    Link 4 (docker0):\n\
+                    Link 5 (lo): 127.0.0.53\n";
+        let expected: Vec<SocketAddr> = ["192.168.3.1:53", "172.30.0.10:53", "9.9.9.9:53"]
+            .iter()
+            .map(|s| s.parse().unwrap())
+            .collect();
+        assert_eq!(parse_resolvectl_dns(text), expected);
+        assert!(parse_resolvectl_dns("Global: 127.0.0.1:5354\n").is_empty());
     }
 
     #[test]

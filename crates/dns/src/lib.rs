@@ -185,7 +185,17 @@ async fn answer(
     }
 }
 
+/// Vrai pour une réponse NXDOMAIN, SERVFAIL ou REFUSED.
+fn is_negative(reply: &[u8]) -> bool {
+    reply.len() >= 4 && matches!(reply[3] & 0x0f, 2 | 3 | 5)
+}
+
+/// Interroge les amonts dans l'ordre. Une réponse négative n'arrête pas la
+/// recherche : un nom privé n'est connu que du DNS du réseau local, un nom
+/// public parfois seulement d'un résolveur public. La première réponse
+/// positive l'emporte ; à défaut, la première réponse négative est rendue.
 async fn forward(packet: &[u8], tcp: bool, upstreams: &[SocketAddr]) -> Result<Vec<u8>> {
+    let mut negative = None;
     let mut last_error = None;
     for upstream in upstreams {
         let attempt = if tcp {
@@ -194,13 +204,15 @@ async fn forward(packet: &[u8], tcp: bool, upstreams: &[SocketAddr]) -> Result<V
             forward_udp(packet, *upstream).await
         };
         match attempt {
+            Ok(reply) if is_negative(&reply) => negative = negative.or(Some(reply)),
             Ok(reply) => return Ok(reply),
             Err(e) => last_error = Some(e),
         }
     }
-    match last_error {
-        Some(e) => Err(e),
-        None => bail!("aucun résolveur amont configuré"),
+    match (negative, last_error) {
+        (Some(reply), _) => Ok(reply),
+        (None, Some(e)) => Err(e),
+        (None, None) => bail!("aucun résolveur amont configuré"),
     }
 }
 

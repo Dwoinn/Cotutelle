@@ -44,7 +44,7 @@ pub(crate) fn servfail(packet: &[u8]) -> Option<Vec<u8>> {
     reply_to(packet, ResponseCode::ServFail)?.to_bytes().ok()
 }
 
-pub(crate) fn nxdomain(packet: &[u8]) -> Option<Vec<u8>> {
+pub fn nxdomain(packet: &[u8]) -> Option<Vec<u8>> {
     reply_to(packet, ResponseCode::NXDomain)?.to_bytes().ok()
 }
 

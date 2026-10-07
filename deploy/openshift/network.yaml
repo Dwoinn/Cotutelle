@@ -13,8 +13,61 @@ spec:
       port: 8080
       targetPort: http
 ---
+# Certificat Let's Encrypt du nom public, renouvelé par cert-manager.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cotutelle-tls
+  labels:
+    app.kubernetes.io/name: cotutelle-server
+    app.kubernetes.io/part-of: cotutelle
+spec:
+  secretName: cotutelle-tls
+  dnsNames:
+    - cotutelle.infra.donovanwinter.fr
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-public
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+---
+# Le routeur lit le certificat dans le secret : la route suit ainsi les
+# renouvellements sans copie manuelle.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: router-reads-cotutelle-tls
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cotutelle-tls]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: router-reads-cotutelle-tls
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: router-reads-cotutelle-tls
+subjects:
+  - kind: ServiceAccount
+    name: router
+    namespace: openshift-ingress
+---
 # Interface et API en HTTPS. Les agents s'y connectent en WebSocket : le délai
 # d'inactivité du routeur est relevé pour ne pas couper leur connexion.
+# Le nom doit pointer, dans le DNS, vers l'adresse du routeur du cluster.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -26,6 +79,7 @@ metadata:
     haproxy.router.openshift.io/timeout: 5m
     haproxy.router.openshift.io/timeout-tunnel: 1h
 spec:
+  host: cotutelle.infra.donovanwinter.fr
   to:
     kind: Service
     name: cotutelle-server
@@ -34,3 +88,5 @@ spec:
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
+    externalCertificate:
+      name: cotutelle-tls
