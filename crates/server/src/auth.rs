@@ -135,6 +135,21 @@ impl FromRequestParts<Shared> for ChildSession {
     }
 }
 
+/// Parent connecté ou enfant dans son espace : pour ce que les deux voient.
+#[derive(Debug, Clone, Copy)]
+pub struct Viewer;
+
+impl FromRequestParts<Shared> for Viewer {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &Shared) -> Result<Self, ApiError> {
+        if Parent::from_request_parts(parts, state).await.is_ok() {
+            return Ok(Viewer);
+        }
+        ChildSession::from_request_parts(parts, state).await.map(|_| Viewer)
+    }
+}
+
 /// Agent authentifié par le jeton permanent de son appareil.
 #[derive(Debug, Clone)]
 pub struct AgentDevice {

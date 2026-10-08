@@ -7,14 +7,14 @@ use super::grants::{REQUEST_COLUMNS, check_target, request_json, request_sentenc
 use crate::auth::{self, ChildSession, Parent};
 use crate::error::{ApiError, ApiResult};
 use crate::state::Shared;
-use crate::{model, notify, util};
+use crate::{logos, model, notify, util};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::http::header::{LOCATION, SET_COOKIE};
 use axum::response::{IntoResponse, Response};
 use chrono::{Datelike, Local};
-use cotutelle_common::{GrantTarget, catalog};
+use cotutelle_common::GrantTarget;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -40,11 +40,25 @@ async fn space(state: &Shared, child_id: &str) -> Result<Value, ApiError> {
     .fetch_all(&state.db)
     .await?;
 
-    let services: Vec<Value> = catalog::SERVICES
+    // L'enfant ne reçoit que les services qui le concernent : ceux que ses
+    // parents lui proposent, et ceux qu'ils lui ont ouverts.
+    let filter = &child.policy.filter;
+    let requestable =
+        |id: &str| filter.blocked_services.contains(id) && filter.requestable_services.contains(id);
+    let granted = |id: &str| {
+        child_grants
+            .iter()
+            .any(|g| matches!(&g.target, GrantTarget::Service { service } if service == id))
+    };
+    let catalog = model::services(&state.db).await?;
+    let logos = logos::index(state).await?;
+    let services: Vec<Value> = catalog
         .iter()
-        .filter(|s| child.policy.filter.blocked_services.contains(s.id))
-        .map(|s| json!({ "id": s.id, "label": s.label, "icon": s.icon }))
+        .filter(|s| requestable(&s.id) || granted(&s.id))
+        .map(|s| json!({ "id": s.id, "label": s.label, "logo": logos.get(&s.id) }))
         .collect();
+    let requestable_services: Vec<&str> =
+        catalog.iter().map(|s| s.id.as_str()).filter(|id| requestable(id)).collect();
 
     let activity = super::children::activity_for(state, "child_id", child_id, 7).await?;
     let blocked_today: i64 = model::blocked_today(&state.db)
@@ -61,9 +75,10 @@ async fn space(state: &Shared, child_id: &str) -> Result<Value, ApiError> {
         "next_opening": next.map(|(day, time)| json!({ "day": day.to_string(), "time": time.format("%H:%M").to_string() })),
         "today_ranges": child.policy.schedule.ranges_for(now.weekday()),
         "grants": grants.iter().filter(|g| g.child_id.as_deref() == Some(child_id)).collect::<Vec<_>>(),
-        "blocked_services": services,
+        "services": services,
+        "requestable_services": requestable_services,
         "allow_requests": child.policy.filter.allow_requests,
-        "requests": requests.into_iter().map(request_json).collect::<Vec<_>>(),
+        "requests": requests.into_iter().map(|row| request_json(&catalog, row)).collect::<Vec<_>>(),
         "activity": activity,
         "blocked_today": blocked_today,
         "now": util::now(),
@@ -128,7 +143,8 @@ pub async fn request(
         return Err(ApiError::new(StatusCode::FORBIDDEN, "les demandes ne sont pas activées"));
     }
     // Un enfant peut demander un service, un site ou du temps : rien d'autre.
-    let target = match check_target(body.target)? {
+    let services = model::services(&state.db).await?;
+    let target = match check_target(&services, body.target)? {
         t @ (GrantTarget::Service { .. } | GrantTarget::Domain { .. }) => t,
         GrantTarget::ExtraMinutes { minutes } if (5..=120).contains(&minutes) => {
             GrantTarget::ExtraMinutes { minutes }
@@ -167,7 +183,7 @@ pub async fn request(
     .execute(&state.db)
     .await?;
 
-    let mut text = request_sentence(&child.name, &target, minutes);
+    let mut text = request_sentence(&services, &child.name, &target, minutes);
     if let Some(message) = &message {
         text.push_str(&format!(" : « {message} »"));
     }

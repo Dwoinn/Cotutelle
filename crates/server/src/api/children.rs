@@ -8,7 +8,7 @@ use crate::util;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use chrono::Duration;
-use cotutelle_common::{Policy, normalize_domain};
+use cotutelle_common::{Policy, clean_domain};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -33,18 +33,14 @@ fn check_birth_year(year: Option<i64>) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Nettoie les listes personnelles : domaines en forme canonique, sans vides.
+/// Nettoie une politique reçue de l'interface : listes personnelles en forme
+/// canonique et sans vides, services proposés pris parmi les services bloqués.
 pub fn sanitize(mut policy: Policy) -> Policy {
-    for list in [&mut policy.filter.allow, &mut policy.filter.deny] {
-        *list = list
-            .iter()
-            .map(|d| {
-                let d = d.trim().trim_start_matches("https://").trim_start_matches("http://");
-                normalize_domain(d.split('/').next().unwrap_or_default().trim_start_matches("www."))
-            })
-            .filter(|d| d.contains('.') && !d.contains(char::is_whitespace))
-            .collect();
+    let filter = &mut policy.filter;
+    for list in [&mut filter.allow, &mut filter.deny] {
+        *list = list.iter().filter_map(|d| clean_domain(d)).collect();
     }
+    filter.requestable_services.retain(|s| filter.blocked_services.contains(s));
     policy
 }
 

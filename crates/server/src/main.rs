@@ -6,6 +6,7 @@ mod blocklists;
 mod error;
 mod hub;
 mod lan;
+mod logos;
 mod model;
 mod notify;
 mod state;

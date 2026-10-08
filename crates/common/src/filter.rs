@@ -12,6 +12,19 @@ pub fn normalize_domain(domain: &str) -> String {
     domain.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
+/// Met en forme un nom de site saisi à la main : sans protocole, sans chemin
+/// et sans `www.`. Rend `None` si ce qui reste n'est pas un nom de domaine.
+pub fn clean_domain(input: &str) -> Option<String> {
+    let input = input.trim();
+    let input =
+        input.strip_prefix("https://").or_else(|| input.strip_prefix("http://")).unwrap_or(input);
+    let host = normalize_domain(input.split(['/', '?', '#']).next().unwrap_or_default());
+    let domain = host.strip_prefix("www.").unwrap_or(&host);
+    let valid =
+        domain.contains('.') && domain.len() <= 253 && !domain.contains(char::is_whitespace);
+    valid.then(|| domain.to_string())
+}
+
 /// Itère sur un domaine et ses domaines parents : `a.b.c`, `b.c`, `c`.
 pub fn suffixes(domain: &str) -> impl Iterator<Item = &str> {
     let mut rest = Some(domain);
@@ -136,6 +149,40 @@ impl Blocklists {
     }
 }
 
+/// Service nommé (« YouTube », « Discord »…) : tous les domaines dont il a
+/// besoin, bloqués ou ouverts d'un seul geste.
+///
+/// Un site ne tient presque jamais sur un seul domaine : ouvrir `youtube.com`
+/// sans `googlevideo.com` donne une page sans vidéo. Le catalogue d'une
+/// famille part de [`catalog::SERVICES`] et se modifie depuis l'interface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Service {
+    pub id: String,
+    pub label: String,
+    /// Domaines en forme canonique ; les sous-domaines sont inclus.
+    pub domains: Vec<String>,
+}
+
+impl Service {
+    pub fn matches(&self, domain: &str) -> bool {
+        self.domains.iter().any(|d| domain_matches(domain, d))
+    }
+}
+
+/// Le service auquel appartient un domaine, s'il y en a un. Quand plusieurs
+/// conviennent, celui qui le désigne le plus précisément l'emporte.
+pub fn service_for_domain<'a>(services: &'a [Service], domain: &str) -> Option<&'a Service> {
+    services
+        .iter()
+        .filter_map(|s| {
+            let best = s.domains.iter().filter(|d| domain_matches(domain, d)).map(String::len);
+            Some((best.max()?, s))
+        })
+        // À précision égale, le premier du catalogue.
+        .reduce(|best, other| if other.0 > best.0 { other } else { best })
+        .map(|(_, s)| s)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum BlockReason {
@@ -168,6 +215,8 @@ pub struct FilterContext<'a> {
     pub policy: &'a FilterPolicy,
     pub grants: &'a [TemporaryGrant],
     pub blocklists: &'a Blocklists,
+    /// Catalogue des services de la famille.
+    pub services: &'a [Service],
     pub now: DateTime<Utc>,
     /// Faux quand l'accès est fermé (horaires, quota) et que le DNS doit
     /// tout bloquer. Les agents, qui verrouillent la session, passent `true`.
@@ -178,9 +227,8 @@ fn matches_any<'a>(domain: &str, entries: impl IntoIterator<Item = &'a String>) 
     entries.into_iter().any(|e| domain_matches(domain, &normalize_domain(e)))
 }
 
-fn service_matches(service_id: &str, domain: &str) -> bool {
-    catalog::service(service_id)
-        .is_some_and(|s| s.domains.iter().any(|d| domain_matches(domain, d)))
+fn service_matches(services: &[Service], service_id: &str, domain: &str) -> bool {
+    services.iter().find(|s| s.id == service_id).is_some_and(|s| s.matches(domain))
 }
 
 /// Décide du sort d'une requête DNS pour `domain`.
@@ -202,7 +250,7 @@ pub fn evaluate(domain: &str, ctx: &FilterContext<'_>) -> Verdict {
         || active.iter().any(|t| match t {
             GrantTarget::Domain { domain: d } => domain_matches(domain, &normalize_domain(d)),
             // Un service débloqué l'emporte aussi sur les catégories qui le contiennent.
-            GrantTarget::Service { service } => service_matches(service, domain),
+            GrantTarget::Service { service } => service_matches(ctx.services, service, domain),
             _ => false,
         });
 
@@ -211,7 +259,7 @@ pub fn evaluate(domain: &str, ctx: &FilterContext<'_>) -> Verdict {
             return Verdict::Block(BlockReason::DenyList);
         }
         for service in &ctx.policy.blocked_services {
-            if service_matches(service, domain) {
+            if service_matches(ctx.services, service, domain) {
                 return Verdict::Block(BlockReason::Service(service.clone()));
             }
         }
@@ -273,11 +321,36 @@ mod tests {
         grants: &[TemporaryGrant],
         now: DateTime<Utc>,
     ) -> Verdict {
+        eval_with(domain, policy, grants, &catalog::builtin_services(), now)
+    }
+
+    fn eval_with(
+        domain: &str,
+        policy: &FilterPolicy,
+        grants: &[TemporaryGrant],
+        services: &[Service],
+        now: DateTime<Utc>,
+    ) -> Verdict {
         let blocklists = lists();
         evaluate(
             domain,
-            &FilterContext { policy, grants, blocklists: &blocklists, now, access_open: true },
+            &FilterContext {
+                policy,
+                grants,
+                blocklists: &blocklists,
+                services,
+                now,
+                access_open: true,
+            },
         )
+    }
+
+    fn service(id: &str, domains: &[&str]) -> Service {
+        Service {
+            id: id.into(),
+            label: id.into(),
+            domains: domains.iter().map(|d| d.to_string()).collect(),
+        }
     }
 
     #[test]
@@ -337,6 +410,57 @@ mod tests {
     }
 
     #[test]
+    fn service_grant_opens_every_domain_of_the_service() {
+        let now = Utc::now();
+        let p = policy();
+        let g = [grant(GrantTarget::Service { service: "youtube".into() }, now, 60)];
+        // Le site, mais aussi ce qui sert ses vidéos et ses images.
+        for domain in ["www.youtube.com", "r3---sn.googlevideo.com", "i.ytimg.com"] {
+            assert_eq!(eval(domain, &p, &g, now), Verdict::Allow, "{domain}");
+        }
+        // Ouvrir le seul domaine du site laisse les vidéos bloquées.
+        let g = [grant(GrantTarget::Domain { domain: "youtube.com".into() }, now, 60)];
+        assert_eq!(eval("www.youtube.com", &p, &g, now), Verdict::Allow);
+        assert!(eval("r3---sn.googlevideo.com", &p, &g, now).is_blocked());
+    }
+
+    #[test]
+    fn services_come_from_the_family_catalog() {
+        let now = Utc::now();
+        let p = FilterPolicy { blocked_services: ["jeu".to_string()].into(), ..Default::default() };
+        let services = [service("jeu", &["jeu.example", "cdn-jeu.example"])];
+        assert_eq!(
+            eval_with("img.cdn-jeu.example", &p, &[], &services, now),
+            Verdict::Block(BlockReason::Service("jeu".into()))
+        );
+        let g = [grant(GrantTarget::Service { service: "jeu".into() }, now, 30)];
+        assert_eq!(eval_with("img.cdn-jeu.example", &p, &g, &services, now), Verdict::Allow);
+        // Un service retiré du catalogue ne bloque plus rien.
+        assert_eq!(eval_with("jeu.example", &p, &[], &[], now), Verdict::Allow);
+    }
+
+    #[test]
+    fn domain_resolves_to_its_most_specific_service() {
+        let services = [
+            service("google", &["google.com", "googleapis.com"]),
+            service("youtube", &["youtube.com", "googlevideo.com", "youtubei.googleapis.com"]),
+        ];
+        let id = |d: &str| service_for_domain(&services, d).map(|s| s.id.as_str());
+        assert_eq!(id("r3---sn.googlevideo.com"), Some("youtube"));
+        assert_eq!(id("youtubei.googleapis.com"), Some("youtube"));
+        assert_eq!(id("maps.googleapis.com"), Some("google"));
+        assert_eq!(id("fr.wikipedia.org"), None);
+    }
+
+    #[test]
+    fn typed_sites_are_cleaned() {
+        assert_eq!(clean_domain(" https://www.YouTube.com/watch?v=x "), Some("youtube.com".into()));
+        assert_eq!(clean_domain("lumni.fr."), Some("lumni.fr".into()));
+        assert_eq!(clean_domain("youtube"), None);
+        assert_eq!(clean_domain("you tube.com"), None);
+    }
+
+    #[test]
     fn expired_grant_is_ignored() {
         let now = Utc::now();
         let p = policy();
@@ -376,6 +500,7 @@ mod tests {
             policy: &p,
             grants: &[],
             blocklists: &blocklists,
+            services: &[],
             now,
             access_open: false,
         };

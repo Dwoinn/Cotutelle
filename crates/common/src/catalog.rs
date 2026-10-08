@@ -1,10 +1,11 @@
-//! Catalogue statique : catégories de listes mises en avant dans l'interface
-//! et services nommés (« YouTube », « TikTok »…).
+//! Catalogue fourni avec Cotutelle : catégories de listes mises en avant dans
+//! l'interface et services nommés de départ (« YouTube », « TikTok »…).
 //!
 //! Les catégories viennent des listes UT1 de l'Université Toulouse Capitole
 //! (licence CC BY-SA 4.0). Toute catégorie présente dans l'archive reste
 //! utilisable même si elle n'est pas décrite ici.
 
+use crate::Service;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -146,21 +147,35 @@ pub const CATEGORY_GROUPS: &[(&str, &str)] = &[
     ("confort", "Confort"),
 ];
 
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct ServiceInfo {
+/// Service fourni avec Cotutelle.
+///
+/// Ce n'est qu'un point de départ : les parents peuvent en changer le nom et
+/// les sites, ou ajouter leurs propres services. Le catalogue d'une famille
+/// est une donnée du serveur, distribuée aux agents avec l'état de l'appareil
+/// (voir [`crate::Service`]).
+#[derive(Debug, Clone, Copy)]
+pub struct BuiltinService {
     pub id: &'static str,
     pub label: &'static str,
-    pub icon: &'static str,
-    /// Domaines du service ; les sous-domaines sont inclus.
+    /// Tous les domaines dont le service a besoin, sous-domaines inclus : le
+    /// site lui-même, mais aussi ses vidéos, ses images, son API. Le premier
+    /// est le site principal, celui dont l'interface reprend le logo.
     pub domains: &'static [&'static str],
 }
 
-pub const SERVICES: &[ServiceInfo] = &[
-    ServiceInfo {
-        id: "youtube",
-        label: "YouTube",
-        icon: "▶️",
-        domains: &[
+const fn svc(
+    id: &'static str,
+    label: &'static str,
+    domains: &'static [&'static str],
+) -> BuiltinService {
+    BuiltinService { id, label, domains }
+}
+
+pub const SERVICES: &[BuiltinService] = &[
+    svc(
+        "youtube",
+        "YouTube",
+        &[
             "youtube.com",
             "youtu.be",
             "youtube-nocookie.com",
@@ -170,19 +185,14 @@ pub const SERVICES: &[ServiceInfo] = &[
             "youtube.googleapis.com",
             "youtubekids.com",
             "yt3.ggpht.com",
+            "yt3.googleusercontent.com",
         ],
-    },
-    ServiceInfo {
-        id: "twitch",
-        label: "Twitch",
-        icon: "🎮",
-        domains: &["twitch.tv", "ttvnw.net", "jtvnw.net", "twitchcdn.net"],
-    },
-    ServiceInfo {
-        id: "tiktok",
-        label: "TikTok",
-        icon: "🎵",
-        domains: &[
+    ),
+    svc("twitch", "Twitch", &["twitch.tv", "ttvnw.net", "jtvnw.net", "twitchcdn.net"]),
+    svc(
+        "tiktok",
+        "TikTok",
+        &[
             "tiktok.com",
             "tiktokv.com",
             "tiktokcdn.com",
@@ -191,77 +201,53 @@ pub const SERVICES: &[ServiceInfo] = &[
             "byteoversea.com",
             "ibytedtos.com",
         ],
-    },
-    ServiceInfo {
-        id: "instagram",
-        label: "Instagram",
-        icon: "📷",
-        domains: &["instagram.com", "cdninstagram.com", "ig.me"],
-    },
-    ServiceInfo {
-        id: "snapchat",
-        label: "Snapchat",
-        icon: "👻",
-        domains: &["snapchat.com", "sc-cdn.net", "snap-dev.net", "snapkit.co"],
-    },
-    ServiceInfo {
-        id: "discord",
-        label: "Discord",
-        icon: "💬",
-        domains: &[
-            "discord.com",
-            "discord.gg",
-            "discordapp.com",
-            "discordapp.net",
-            "discord.media",
-        ],
-    },
-    ServiceInfo {
-        id: "whatsapp",
-        label: "WhatsApp",
-        icon: "📱",
-        domains: &["whatsapp.com", "whatsapp.net", "wa.me"],
-    },
-    ServiceInfo {
-        id: "roblox",
-        label: "Roblox",
-        icon: "🧱",
-        domains: &["roblox.com", "rbxcdn.com", "rbx.com", "robloxlabs.com"],
-    },
-    ServiceInfo {
-        id: "fortnite",
-        label: "Fortnite / Epic Games",
-        icon: "🪂",
-        domains: &["epicgames.com", "fortnite.com", "epicgames.dev", "unrealengine.com"],
-    },
-    ServiceInfo {
-        id: "minecraft",
-        label: "Minecraft en ligne",
-        icon: "⛏️",
-        domains: &["minecraft.net", "minecraftservices.com", "mojang.com"],
-    },
-    ServiceInfo {
-        id: "netflix",
-        label: "Netflix",
-        icon: "🎬",
-        domains: &["netflix.com", "nflxvideo.net", "nflximg.net", "nflxext.com", "nflxso.net"],
-    },
-    ServiceInfo {
-        id: "disneyplus",
-        label: "Disney+",
-        icon: "🏰",
-        domains: &["disneyplus.com", "disney-plus.net", "dssott.com", "bamgrid.com"],
-    },
-    ServiceInfo {
-        id: "chatgpt",
-        label: "ChatGPT",
-        icon: "🤖",
-        domains: &["chatgpt.com", "openai.com", "oaistatic.com", "oaiusercontent.com"],
-    },
+    ),
+    svc("instagram", "Instagram", &["instagram.com", "cdninstagram.com", "ig.me"]),
+    svc("snapchat", "Snapchat", &["snapchat.com", "sc-cdn.net", "snap-dev.net", "snapkit.co"]),
+    svc(
+        "discord",
+        "Discord",
+        &["discord.com", "discord.gg", "discordapp.com", "discordapp.net", "discord.media"],
+    ),
+    svc("whatsapp", "WhatsApp", &["whatsapp.com", "whatsapp.net", "wa.me"]),
+    svc("roblox", "Roblox", &["roblox.com", "rbxcdn.com", "rbx.com", "robloxlabs.com"]),
+    svc(
+        "fortnite",
+        "Fortnite / Epic Games",
+        &["fortnite.com", "epicgames.com", "epicgames.dev", "unrealengine.com"],
+    ),
+    svc(
+        "minecraft",
+        "Minecraft en ligne",
+        &["minecraft.net", "minecraftservices.com", "mojang.com"],
+    ),
+    svc(
+        "netflix",
+        "Netflix",
+        &["netflix.com", "nflxvideo.net", "nflximg.net", "nflxext.com", "nflxso.net"],
+    ),
+    svc(
+        "disneyplus",
+        "Disney+",
+        &["disneyplus.com", "disney-plus.net", "dssott.com", "bamgrid.com"],
+    ),
+    svc(
+        "chatgpt",
+        "ChatGPT",
+        &["chatgpt.com", "openai.com", "oaistatic.com", "oaiusercontent.com"],
+    ),
 ];
 
-pub fn service(id: &str) -> Option<&'static ServiceInfo> {
-    SERVICES.iter().find(|s| s.id == id)
+/// Les services fournis, sous la forme échangée avec les agents.
+pub fn builtin_services() -> Vec<Service> {
+    SERVICES
+        .iter()
+        .map(|s| Service {
+            id: s.id.to_string(),
+            label: s.label.to_string(),
+            domains: s.domains.iter().map(|d| d.to_string()).collect(),
+        })
+        .collect()
 }
 
 /// Domaines « canaris » : leur blocage en NXDOMAIN signale aux navigateurs

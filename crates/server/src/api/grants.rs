@@ -8,7 +8,7 @@ use crate::state::Shared;
 use crate::util;
 use axum::Json;
 use axum::extract::{Path, State};
-use cotutelle_common::{GrantTarget, catalog, normalize_domain};
+use cotutelle_common::{GrantTarget, Service, clean_domain, service_for_domain};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -30,26 +30,21 @@ pub struct GrantInput {
 }
 
 /// Vérifie et normalise la cible d'une exception.
-pub fn check_target(target: GrantTarget) -> Result<GrantTarget, ApiError> {
+///
+/// Un site qui fait partie d'un service désigne le service entier : ouvrir
+/// `youtube.com` seul laisserait ses vidéos bloquées sur `googlevideo.com`.
+pub fn check_target(services: &[Service], target: GrantTarget) -> Result<GrantTarget, ApiError> {
     match target {
-        GrantTarget::Service { ref service } if catalog::service(service).is_none() => {
+        GrantTarget::Service { ref service } if !services.iter().any(|s| s.id == *service) => {
             Err(ApiError::bad_request("service inconnu"))
         }
         GrantTarget::Domain { domain } => {
-            let domain = normalize_domain(
-                domain
-                    .trim()
-                    .trim_start_matches("https://")
-                    .trim_start_matches("http://")
-                    .split('/')
-                    .next()
-                    .unwrap_or(""),
-            );
-            let domain = domain.trim_start_matches("www.").to_string();
-            if !domain.contains('.') || domain.contains(char::is_whitespace) || domain.len() > 253 {
-                return Err(ApiError::bad_request("nom de site invalide"));
-            }
-            Ok(GrantTarget::Domain { domain })
+            let domain = clean_domain(&domain)
+                .ok_or_else(|| ApiError::bad_request("nom de site invalide"))?;
+            Ok(match service_for_domain(services, &domain) {
+                Some(service) => GrantTarget::Service { service: service.id.clone() },
+                None => GrantTarget::Domain { domain },
+            })
         }
         GrantTarget::ExtraMinutes { minutes } if !(1..=600).contains(&minutes) => {
             Err(ApiError::bad_request("temps bonus : entre 1 et 600 minutes"))
@@ -103,14 +98,12 @@ pub async fn create(
     if body.child_id.is_some() == body.device_id.is_some() {
         return Err(ApiError::bad_request("indiquer un enfant ou un appareil, pas les deux"));
     }
-    let target = check_target(body.target)?;
+    let services = model::services(&state.db).await?;
+    let target = check_target(&services, body.target)?;
     if body.device_id.is_some() && matches!(target, GrantTarget::ExtraMinutes { .. }) {
         return Err(ApiError::bad_request("le temps bonus s'accorde à un enfant"));
     }
-    // Une nouvelle pause remplace la précédente ; lever la pause la supprime.
-    if matches!(target, GrantTarget::Pause) {
-        clear_pause(&state, body.child_id.as_deref(), body.device_id.as_deref()).await?;
-    }
+    replace_same(&state, body.child_id.as_deref(), body.device_id.as_deref(), &target).await?;
     let (id, expires_at) = insert_grant(
         &state,
         body.child_id.as_deref(),
@@ -121,18 +114,30 @@ pub async fn create(
     )
     .await?;
     state.changed().await;
-    Ok(Json(json!({ "id": id, "expires_at": expires_at })))
+    Ok(Json(json!({
+        "id": id,
+        "expires_at": expires_at,
+        // La cible retenue : le service entier quand le site en fait partie.
+        "target": target,
+        "label": describe_target(&services, &target),
+    })))
 }
 
-async fn clear_pause(
+/// Une mesure remplace celle de même cible encore en cours : rouvrir YouTube
+/// en change la durée, sans afficher deux ouvertures. Seul le temps bonus se cumule.
+async fn replace_same(
     state: &Shared,
     child_id: Option<&str>,
     device_id: Option<&str>,
+    target: &GrantTarget,
 ) -> Result<(), ApiError> {
+    if matches!(target, GrantTarget::ExtraMinutes { .. }) {
+        return Ok(());
+    }
     sqlx::query(
         "DELETE FROM grants WHERE target = ? AND expires_at > ? AND child_id IS ? AND device_id IS ?",
     )
-    .bind(serde_json::to_string(&GrantTarget::Pause)?)
+    .bind(serde_json::to_string(target)?)
     .bind(util::now())
     .bind(child_id)
     .bind(device_id)
@@ -157,6 +162,7 @@ pub async fn revoke(
 type RequestRow = (String, String, String, String, Option<i64>, Option<String>, String, i64);
 
 pub fn request_json(
+    services: &[Service],
     (id, child_id, child_name, target, minutes, message, status, created_at): RequestRow,
 ) -> Value {
     let target: Option<GrantTarget> = serde_json::from_str(&target).ok();
@@ -164,7 +170,7 @@ pub fn request_json(
         "id": id,
         "child_id": child_id,
         "child_name": child_name,
-        "label": target.as_ref().map(describe_target),
+        "label": target.as_ref().map(|t| describe_target(services, t)),
         "target": target,
         "minutes": minutes,
         "message": message,
@@ -183,7 +189,8 @@ pub async fn pending_requests(state: &Shared) -> Result<Vec<Value>, ApiError> {
     ))
     .fetch_all(&state.db)
     .await?;
-    Ok(rows.into_iter().map(request_json).collect())
+    let services = model::services(&state.db).await?;
+    Ok(rows.into_iter().map(|row| request_json(&services, row)).collect())
 }
 
 pub async fn requests(_: Parent, State(state): State<Shared>) -> ApiResult<Vec<Value>> {
@@ -234,6 +241,7 @@ pub async fn approve(
     if let (GrantTarget::ExtraMinutes { minutes: asked }, Some(granted)) = (&mut target, minutes) {
         *asked = granted.clamp(1, 600);
     }
+    replace_same(&state, Some(&child_id), None, &target).await?;
     let (grant_id, expires_at) =
         insert_grant(&state, Some(&child_id), None, &target, minutes, &parent.id).await?;
     resolve(&state, &id, "approved", &parent.id).await?;
@@ -252,14 +260,15 @@ pub async fn deny(
 }
 
 /// Texte d'une demande pour la notification aux parents.
-pub fn request_sentence(child_name: &str, target: &GrantTarget, minutes: Option<u32>) -> String {
+pub fn request_sentence(
+    services: &[Service],
+    child_name: &str,
+    target: &GrantTarget,
+    minutes: Option<u32>,
+) -> String {
+    let what = describe_target(services, target);
     match (target, minutes) {
-        (GrantTarget::ExtraMinutes { .. }, _) => {
-            format!("{child_name} demande {}", describe_target(target))
-        }
-        (_, Some(m)) => {
-            format!("{child_name} demande {} pendant {}", describe_target(target), minutes_label(m))
-        }
-        (_, None) => format!("{child_name} demande {}", describe_target(target)),
+        (GrantTarget::ExtraMinutes { .. }, _) | (_, None) => format!("{child_name} demande {what}"),
+        (_, Some(m)) => format!("{child_name} demande {what} pendant {}", minutes_label(m)),
     }
 }

@@ -2,10 +2,12 @@
 	import { api } from '#lib/api.ts';
 	import { attempt } from '#lib/app.svelte.ts';
 	import { grantRemaining, minutes, targetLabel } from '#lib/format.ts';
+	import { cleanSite, serviceForSite, siteCount } from '#lib/services.ts';
 	import type { Grant, GrantTarget, Service } from '#lib/types.ts';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import LockOpen from '@lucide/svelte/icons/lock-open';
 	import Segmented from './Segmented.svelte';
+	import ServiceLogo from './ServiceLogo.svelte';
 	import Sheet from './Sheet.svelte';
 
 	// Actions de filtrage : ouvrir un service ou un site pour un moment,
@@ -46,6 +48,16 @@
 	const openings = $derived(grants.filter((g) => g.target.kind !== 'pause'));
 	const openIds = $derived(openings.map((g) => (g.target.kind === 'service' ? g.target.service : '')));
 	const closed = $derived(services.filter((s) => blockedServices.includes(s.id) && !openIds.includes(s.id)));
+	const badge = (target: GrantTarget) => (target.kind === 'service' ? services.find((s) => s.id === target.service) : undefined);
+	// Un site qui fait partie d'un service ouvre le service entier.
+	const whole = $derived(serviceForSite(services, site));
+
+	function openSite() {
+		const domain = cleanSite(site);
+		if (!domain) return;
+		if (whole) grant({ kind: 'service', service: whole.id }, `${whole.label} ouvert pour ${name} pendant ${minutes(duration)}`);
+		else grant({ kind: 'domain', domain }, `${domain} ouvert pendant ${minutes(duration)}`);
+	}
 
 	async function grant(target: GrantTarget, message: string) {
 		busy = true;
@@ -81,8 +93,10 @@
 				<h3 class="mb-1">Ouvert en ce moment</h3>
 				<div class="rows">
 					{#each openings as g (g.id)}
-						<div class="row justify-between">
-							<span>
+						{@const service = badge(g.target)}
+						<div class="row">
+							{#if service}<ServiceLogo label={service.label} logo={service.logo} size={38} />{/if}
+							<span class="min-w-0 flex-1">
 								<span class="font-semibold">{targetLabel(g.target, services)}</span>
 								<span class="muted block text-sm">{grantRemaining(g, now)}</span>
 							</span>
@@ -109,11 +123,12 @@
 				<div class="rows mt-2">
 					{#each closed as service (service.id)}
 						<button
-							class="row justify-between"
+							class="row"
 							disabled={busy}
 							onclick={() => grant({ kind: 'service', service: service.id }, `${service.label} ouvert pour ${name} pendant ${minutes(duration)}`)}
 						>
-							<span class="font-semibold">{service.label}</span>
+							<ServiceLogo label={service.label} logo={service.logo} size={38} />
+							<span class="min-w-0 flex-1 font-semibold">{service.label}</span>
 							<span class="muted flex items-center gap-1 text-sm"><LockOpen size={17} /> {minutes(duration)}</span>
 						</button>
 					{/each}
@@ -123,7 +138,7 @@
 				class="mt-3"
 				onsubmit={(e) => {
 					e.preventDefault();
-					if (site.trim()) grant({ kind: 'domain', domain: site.trim() }, `${site.trim()} ouvert pendant ${minutes(duration)}`);
+					openSite();
 				}}
 			>
 				<label class="label" for="open-site">Un site précis</label>
@@ -131,6 +146,14 @@
 					<input id="open-site" class="field" placeholder="lumni.fr" bind:value={site} autocomplete="off" autocapitalize="off" inputmode="url" />
 					<button class="btn-primary shrink-0" disabled={busy || !site.trim()}>Ouvrir</button>
 				</div>
+				{#if whole}
+					<p class="bg-sun-soft mt-2 flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm">
+						<ServiceLogo label={whole.label} logo={whole.logo} size={34} />
+						<span>
+							Ce site fait partie de <strong>{whole.label}</strong> : tout le service s'ouvrira, soit {siteCount(whole.domains)}.
+						</span>
+					</p>
+				{/if}
 			</form>
 		</section>
 

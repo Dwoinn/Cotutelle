@@ -31,6 +31,11 @@ d'un cadran. Dans l'interface, chaque enfant a ces deux instruments côte à
 côte (`Dial.svelte`, `Shield.svelte`) ; chacun est une zone tactile qui ouvre
 ses actions dans une feuille de bas d'écran (`TimeSheet`, `FilterSheet`).
 
+Les états du bouclier servent aussi de vocabulaire au réglage des services
+(`ServiceMode.svelte`, un interrupteur à trois positions) : en pointillés,
+le filtre laisse passer ; à moitié soleil, il s'ouvre sur demande ; plein,
+il bloque.
+
 | Nom | Valeur | Emploi |
 |-----|--------|--------|
 | Nuit | `#16203a` | Encre, bouclier, action principale ; fond du thème sombre |
@@ -54,6 +59,9 @@ appel à un serveur de polices.
 - Les actions s'ouvrent dans une feuille (`Sheet.svelte`), en bas d'écran sur
   téléphone, centrée sur grand écran.
 - Pas d'émoji : icônes Lucide au trait, monogrammes pour les enfants.
+- Un service se montre par son logo (`ServiceLogo.svelte`), toujours sur une
+  pastille claire, ou par son initiale tant que le serveur n'en a pas trouvé.
+  Les parents le lisent en lignes, l'enfant le choisit en grandes tuiles.
 - Rien ne dépend du survol, ni d'une animation pour être visible.
 - Durées avec espaces insécables (`format.ts`), jamais de « 30 / min ».
 

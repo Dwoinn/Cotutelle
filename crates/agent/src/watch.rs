@@ -338,6 +338,7 @@ mod tests {
                 issued_at: Utc::now(),
                 accounts: vec![account],
                 blocklists: vec![],
+                services: vec![],
                 upstream_dns: vec![],
             })
             .into(),

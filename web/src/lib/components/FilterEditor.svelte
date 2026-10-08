@@ -1,15 +1,66 @@
 <script lang="ts">
-	import type { Catalog, Policy } from '#lib/types.ts';
+	import { type ServiceMode as Mode, serviceMode, setServiceMode, siteCount } from '#lib/services.ts';
+	import type { Catalog, Policy, Service } from '#lib/types.ts';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import Plus from '@lucide/svelte/icons/plus';
+	import ServiceLogo from './ServiceLogo.svelte';
+	import ServiceMode from './ServiceMode.svelte';
+	import ServiceSheet from './ServiceSheet.svelte';
+	import Shield from './Shield.svelte';
 	import Switch from './Switch.svelte';
 
 	// Réglage du filtre : services, catégories de sites, listes personnelles.
-	let { filter = $bindable(), catalog }: { filter: Policy['filter']; catalog: Catalog } = $props();
+	let {
+		filter = $bindable(),
+		catalog = $bindable(),
+		childName = null
+	}: {
+		filter: Policy['filter'];
+		catalog: Catalog;
+		/** L'enfant concerné ; absent pour un appareil partagé, où personne ne fait de demande. */
+		childName?: string | null;
+	} = $props();
 
 	const fmt = new Intl.NumberFormat('fr-FR');
 
-	function toggle(list: 'blocked_services' | 'blocked_categories', id: string) {
-		filter[list] = filter[list].includes(id) ? filter[list].filter((x) => x !== id) : [...filter[list], id];
+	// Les positions de l'interrupteur, expliquées une fois au-dessus de la liste.
+	const KEY = $derived(
+		(
+			[
+				{ mode: 'open', term: 'Autorisé', meaning: 'le service n’est pas bloqué.' },
+				{ mode: 'ask', term: 'Sur demande', meaning: `bloqué, mais ${childName} peut vous demander de l’ouvrir.` },
+				{
+					mode: 'blocked',
+					term: 'Bloqué',
+					meaning: childName ? `bloqué, sans être proposé à ${childName}.` : 'vous pouvez l’ouvrir pour un moment depuis l’accueil.'
+				}
+			] satisfies { mode: Mode; term: string; meaning: string }[]
+		).filter((k) => childName || k.mode !== 'ask')
+	);
+
+	let editing = $state<Service | null>(null);
+	let sheetOpen = $state(false);
+
+	function edit(service: Service | null) {
+		editing = service;
+		sheetOpen = true;
+	}
+
+	function saved(service: Service, added: boolean) {
+		const at = catalog.services.findIndex((s) => s.id === service.id);
+		catalog.services = at < 0 ? [...catalog.services, service] : catalog.services.with(at, service);
+		// Un service qu'on vient d'ajouter ici, c'est pour le bloquer.
+		if (added) setServiceMode(filter, service.id, childName ? 'ask' : 'blocked');
+	}
+
+	function removed(id: string) {
+		catalog.services = catalog.services.filter((s) => s.id !== id);
+		setServiceMode(filter, id, 'open');
+	}
+
+	function toggle(id: string) {
+		const blocked = filter.blocked_categories;
+		filter.blocked_categories = blocked.includes(id) ? blocked.filter((x) => x !== id) : [...blocked, id];
 	}
 
 	function setGroup(ids: string[], blocked: boolean) {
@@ -38,15 +89,41 @@
 
 	<section>
 		<h2>Services</h2>
-		<p class="muted mb-1 text-sm">Un service bloqué peut être ouvert pour un moment depuis l'accueil.</p>
+		<p class="muted mb-3 text-sm">
+			Un service réunit tous les sites dont une appli a besoin. Touchez son nom pour les voir ou en ajouter.
+		</p>
+		<ul class="bg-bg mb-1 space-y-1.5 rounded-[20px] px-3.5 py-3 text-sm">
+			{#each KEY as key (key.mode)}
+				<li class="flex items-start gap-2.5">
+					<Shield size={22} opened={key.mode === 'ask'} inactive={key.mode === 'open'} />
+					<span><strong class="font-semibold">{key.term}</strong><span class="muted">&nbsp;: {key.meaning}</span></span>
+				</li>
+			{/each}
+		</ul>
 		<div class="rows">
 			{#each catalog.services as service (service.id)}
-				{@const blocked = filter.blocked_services.includes(service.id)}
-				<button type="button" class="row justify-between" aria-pressed={blocked} onclick={() => toggle('blocked_services', service.id)}>
-					<span class="font-semibold">{service.label}</span>
-					{@render state(blocked)}
-				</button>
+				<div class="row gap-2 py-1.5">
+					<button type="button" class="-my-1 flex min-h-12 min-w-0 flex-1 items-center gap-3 rounded-xl text-left" onclick={() => edit(service)}>
+						<ServiceLogo label={service.label} logo={service.logo} size={38} />
+						<span class="min-w-0">
+							<span class="block leading-tight font-semibold [overflow-wrap:anywhere]">{service.label}</span>
+							<span class="muted block text-sm">{siteCount(service.domains)}</span>
+						</span>
+					</button>
+					<ServiceMode
+						value={serviceMode(filter, service.id)}
+						name={service.label}
+						ask={childName !== null}
+						onchange={(mode) => setServiceMode(filter, service.id, mode)}
+					/>
+				</div>
 			{/each}
+			<button type="button" class="row gap-3" onclick={() => edit(null)}>
+				<span class="border-line text-muted flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-[11px] border-2 border-dashed">
+					<Plus size={20} />
+				</span>
+				<span class="font-semibold">Ajouter un service</span>
+			</button>
 		</div>
 		<div class="border-line mt-1 border-t">
 			<Switch
@@ -80,7 +157,7 @@
 						<div class="rows">
 							{#each group.categories as category (category.id)}
 								{@const blocked = filter.blocked_categories.includes(category.id)}
-								<button type="button" class="row justify-between" aria-pressed={blocked} onclick={() => toggle('blocked_categories', category.id)}>
+								<button type="button" class="row justify-between" aria-pressed={blocked} onclick={() => toggle(category.id)}>
 									<span class="min-w-0">
 										<span class="block font-semibold">{category.label}</span>
 										<span class="muted block text-sm">
@@ -124,3 +201,5 @@
 		</div>
 	</section>
 </div>
+
+<ServiceSheet bind:open={sheetOpen} service={editing} onsaved={saved} onremoved={removed} />

@@ -7,14 +7,15 @@ mod devices;
 mod grants;
 mod overview;
 mod parents;
+mod services;
 mod settings;
 
 use crate::error::ApiError;
 use crate::state::Shared;
 use axum::Router;
 use axum::routing::{delete, get, post, put};
-use cotutelle_common::GrantTarget;
 use cotutelle_common::catalog;
+use cotutelle_common::{GrantTarget, Service};
 
 pub fn router() -> Router<Shared> {
     Router::new()
@@ -50,6 +51,9 @@ pub fn router() -> Router<Shared> {
         .route("/alerts/ack-all", post(overview::ack_all))
         .route("/alerts/{id}/ack", post(overview::ack))
         .route("/catalog", get(settings::catalog))
+        .route("/services", post(services::create))
+        .route("/services/{id}", put(services::update).delete(services::remove))
+        .route("/services/{id}/logo", get(services::logo))
         .route("/settings", get(settings::get).put(settings::update))
         .route("/blocklists/refresh", post(settings::refresh_blocklists))
         // Espace enfant
@@ -81,11 +85,12 @@ fn minutes_label(minutes: u32) -> String {
 }
 
 /// Décrit une cible d'exception en français, pour les notifications.
-fn describe_target(target: &GrantTarget) -> String {
+fn describe_target(services: &[Service], target: &GrantTarget) -> String {
     match target {
-        GrantTarget::Service { service } => {
-            catalog::service(service).map_or_else(|| service.clone(), |s| s.label.to_string())
-        }
+        GrantTarget::Service { service } => services
+            .iter()
+            .find(|s| s.id == *service)
+            .map_or_else(|| service.clone(), |s| s.label.clone()),
         GrantTarget::Category { category } => catalog::CATEGORIES
             .iter()
             .find(|c| c.id == category)

@@ -21,4 +21,7 @@ pub use schedule::*;
 
 /// Version du protocole agent ↔ serveur. Incrémentée à chaque changement
 /// incompatible des messages de [`protocol`].
-pub const PROTOCOL_VERSION: u16 = 1;
+///
+/// 2 : l'état porte le catalogue des services. Un agent resté en version 1
+/// l'ignore et n'applique que les services fournis avec lui.
+pub const PROTOCOL_VERSION: u16 = 2;

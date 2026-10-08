@@ -6,8 +6,8 @@ use chrono::{Datelike, Local, NaiveTime};
 use cotutelle_common::catalog;
 use cotutelle_common::schedule::{TimeRange, WeeklySchedule};
 use cotutelle_common::{
-    AccessStatus, FilterPolicy, GrantId, GrantTarget, Policy, Quota, TemporaryGrant, Usage,
-    evaluate_access,
+    AccessStatus, FilterPolicy, GrantId, GrantTarget, Policy, Quota, Service, TemporaryGrant,
+    Usage, evaluate_access,
 };
 use serde::Serialize;
 use sqlx::SqlitePool;
@@ -48,6 +48,92 @@ pub async fn child(db: &SqlitePool, id: &str) -> Result<Option<Child>> {
             .fetch_optional(db)
             .await?;
     Ok(row.map(child_from_row))
+}
+
+/// Service du catalogue de la famille.
+#[derive(Debug, Clone, Serialize)]
+pub struct ServiceEntry {
+    #[serde(flatten)]
+    pub service: Service,
+    /// Fourni avec Cotutelle, par opposition à ajouté par les parents.
+    pub builtin: bool,
+    /// Service fourni dont les parents ont changé le nom ou les sites.
+    pub modified: bool,
+}
+
+/// Catalogue de la famille : les services fournis, tels que les parents les
+/// ont éventuellement modifiés, puis ceux qu'ils ont ajoutés.
+pub async fn service_entries(db: &SqlitePool) -> Result<Vec<ServiceEntry>> {
+    let rows: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT id, label, domains FROM services ORDER BY label COLLATE NOCASE")
+            .fetch_all(db)
+            .await?;
+    // Une ligne illisible est ignorée : un service fourni garde alors ses sites d'origine.
+    let mut own: Vec<Service> = rows
+        .into_iter()
+        .filter_map(|(id, label, domains)| {
+            let domains: Vec<String> = serde_json::from_str(&domains).ok()?;
+            (!domains.is_empty()).then_some(Service { id, label, domains })
+        })
+        .collect();
+
+    let mut entries: Vec<ServiceEntry> = catalog::builtin_services()
+        .into_iter()
+        .map(|builtin| match own.iter().position(|s| s.id == builtin.id) {
+            Some(at) => ServiceEntry { service: own.remove(at), builtin: true, modified: true },
+            None => ServiceEntry { service: builtin, builtin: true, modified: false },
+        })
+        .collect();
+    entries.extend(own.into_iter().map(|service| ServiceEntry {
+        service,
+        builtin: false,
+        modified: false,
+    }));
+    Ok(entries)
+}
+
+pub async fn services(db: &SqlitePool) -> Result<Vec<Service>> {
+    Ok(service_entries(db).await?.into_iter().map(|e| e.service).collect())
+}
+
+/// Retire un service supprimé de toutes les politiques, et avec lui les
+/// exceptions et les demandes en attente qui le visaient.
+pub async fn forget_service(db: &SqlitePool, id: &str) -> Result<()> {
+    let mut tx = db.begin().await?;
+    for table in ["children", "devices"] {
+        let rows: Vec<(String, String)> =
+            sqlx::query_as(&format!("SELECT id, policy FROM {table} WHERE policy IS NOT NULL"))
+                .fetch_all(&mut *tx)
+                .await?;
+        for (row_id, policy) in rows {
+            let Ok(mut policy) = serde_json::from_str::<Policy>(&policy) else { continue };
+            let blocked = policy.filter.blocked_services.remove(id);
+            let requestable = policy.filter.requestable_services.remove(id);
+            if blocked || requestable {
+                sqlx::query(&format!("UPDATE {table} SET policy = ? WHERE id = ?"))
+                    .bind(serde_json::to_string(&policy)?)
+                    .bind(row_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+    }
+    const TARGETS_IT: &str =
+        "json_extract(target, '$.kind') = 'service' AND json_extract(target, '$.service') = ?";
+    sqlx::query(&format!("DELETE FROM grants WHERE {TARGETS_IT}"))
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(&format!("DELETE FROM requests WHERE status = 'pending' AND {TARGETS_IT}"))
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM service_logos WHERE service_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -167,6 +253,13 @@ pub fn default_policy(birth_year: Option<i64>) -> Policy {
     if young {
         blocked_services.extend(["youtube", "twitch", "chatgpt"]);
     }
+    // Les réseaux sociaux réservés aux plus de 13 ans sont bloqués sans être
+    // proposés ; le reste peut se demander depuis l'espace enfant.
+    let requestable_services = blocked_services
+        .iter()
+        .filter(|s| !["tiktok", "instagram", "snapchat"].contains(s))
+        .map(|s| s.to_string())
+        .collect();
 
     let school_day = || vec![TimeRange::new(hm(17, 0), hm(if young { 19 } else { 20 }, 0))];
     let free_day = || vec![TimeRange::new(hm(9, 0), hm(if young { 19 } else { 20 }, 0))];
@@ -175,6 +268,7 @@ pub fn default_policy(birth_year: Option<i64>) -> Policy {
         filter: FilterPolicy {
             blocked_categories: catalog::recommended_categories().map(str::to_string).collect(),
             blocked_services: blocked_services.into_iter().map(str::to_string).collect(),
+            requestable_services,
             youtube_restricted: true,
             allow_requests: true,
             ..Default::default()

@@ -326,7 +326,7 @@ sudo systemctl enable --now cotutelle-agent</pre>
 <Sheet bind:open={policyOpen} title="Règles de {policyDevice?.name ?? ''}" wide>
 	{#if policyDraft && catalog}
 		<div class="space-y-8">
-			<FilterEditor bind:filter={policyDraft.filter} {catalog} />
+			<FilterEditor bind:filter={policyDraft.filter} bind:catalog />
 			<section>
 				<h2>Horaires</h2>
 				<p class="muted mb-2 text-sm">En dehors de ces plages, l'appareil n'a plus accès à Internet.</p>

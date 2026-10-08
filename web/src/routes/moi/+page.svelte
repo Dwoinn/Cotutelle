@@ -7,13 +7,16 @@
 	import Dial from '#lib/components/Dial.svelte';
 	import Logo from '#lib/components/Logo.svelte';
 	import Segmented from '#lib/components/Segmented.svelte';
+	import ServiceLogo from '#lib/components/ServiceLogo.svelte';
 	import Sheet from '#lib/components/Sheet.svelte';
 	import Shield from '#lib/components/Shield.svelte';
 	import WeekChart from '#lib/components/WeekChart.svelte';
 	import { filterGrants, grantRemaining, minutes, nowMinutes, opening, seconds, targetLabel, timeLine } from '#lib/format.ts';
+	import { cleanSite } from '#lib/services.ts';
 	import type { ChildSpace, GrantTarget } from '#lib/types.ts';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Clock from '@lucide/svelte/icons/clock';
+	import Globe from '@lucide/svelte/icons/globe';
 	import LockOpen from '@lucide/svelte/icons/lock-open';
 	import Moon from '@lucide/svelte/icons/moon';
 	import Pause from '@lucide/svelte/icons/pause';
@@ -32,6 +35,8 @@
 	let siteOpen = $state(false);
 	let askMinutes = $state(30);
 	let message = $state('');
+	// Ce que l'enfant veut ouvrir : un service proposé, ou un autre site.
+	let choice = $state<string | null>(null);
 	let site = $state('');
 	let busy = $state(false);
 
@@ -61,6 +66,7 @@
 		if (done) {
 			timeOpen = false;
 			siteOpen = false;
+			choice = null;
 			site = '';
 			message = '';
 			load();
@@ -78,6 +84,17 @@
 	const line = $derived(space && status ? timeLine(status, space.today_ranges, space.next_opening, minute) : '');
 	const opened = $derived(space ? filterGrants(space.grants) : []);
 	const blocked = $derived(space?.blocked_today ?? 0);
+
+	const offered = $derived(space?.services.filter((s) => space?.requestable_services.includes(s.id)) ?? []);
+	const service = (target: GrantTarget) => (target.kind === 'service' ? space?.services.find((s) => s.id === target.service) : undefined);
+	// Sans service proposé, la feuille ne demande que le nom du site.
+	const typing = $derived(choice === 'site' || offered.length === 0);
+	const wanted = $derived.by((): { target: GrantTarget; label: string } | null => {
+		const picked = offered.find((s) => s.id === choice);
+		if (picked) return { target: { kind: 'service', service: picked.id }, label: picked.label };
+		const domain = cleanSite(site);
+		return typing && domain.includes('.') ? { target: { kind: 'domain', domain }, label: domain } : null;
+	});
 
 	const CLOSED: Record<string, string> = {
 		paused: 'Tes parents ont mis l’écran en pause.',
@@ -164,8 +181,10 @@
 					<h3>Tes parents t'ont accordé</h3>
 					<div class="rows mt-1">
 						{#each space.grants.filter((g) => g.target.kind !== 'pause') as grant (grant.id)}
-							<div class="row min-h-12 justify-between py-1.5">
-								<span class="font-semibold">{targetLabel(grant.target, space.blocked_services)}</span>
+							{@const badge = service(grant.target)}
+							<div class="row min-h-12 py-1.5">
+								{#if badge}<ServiceLogo label={badge.label} logo={badge.logo} size={34} />{/if}
+								<span class="min-w-0 flex-1 font-semibold">{targetLabel(grant.target, space.services)}</span>
 								<span class="muted text-sm">{grantRemaining(grant, space.now)}</span>
 							</div>
 						{/each}
@@ -251,7 +270,35 @@
 
 	<Sheet bind:open={siteOpen} title="Demander une ouverture">
 		{#if space}
-			<div class="space-y-5">
+			<form
+				class="space-y-5"
+				onsubmit={(e) => {
+					e.preventDefault();
+					if (wanted) send(wanted.target, askMinutes);
+				}}
+			>
+				{#if offered.length > 0}
+					<div class="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Ce que tu veux ouvrir">
+						{#each offered as item (item.id)}
+							<button type="button" role="radio" aria-checked={choice === item.id} class="choix" onclick={() => (choice = item.id)}>
+								<ServiceLogo label={item.label} logo={item.logo} size={54} />
+								<span>{item.label}</span>
+							</button>
+						{/each}
+						<button type="button" role="radio" aria-checked={choice === 'site'} class="choix" onclick={() => (choice = 'site')}>
+							<span class="border-muted text-muted flex h-[54px] w-[54px] items-center justify-center rounded-[15px] border-2 border-dashed">
+								<Globe size={26} />
+							</span>
+							<span>Un autre site</span>
+						</button>
+					</div>
+				{/if}
+				{#if typing}
+					<div>
+						<label class="label" for="site">Le nom du site</label>
+						<input id="site" class="field" placeholder="exemple.fr" bind:value={site} autocomplete="off" autocapitalize="off" inputmode="url" />
+					</div>
+				{/if}
 				<div>
 					<p class="label">Pendant combien de temps ?</p>
 					<Segmented
@@ -269,29 +316,39 @@
 					<label class="label" for="site-message">Un mot pour tes parents, si tu veux</label>
 					<input id="site-message" class="field" bind:value={message} maxlength="200" placeholder="Pour parler avec Tom" />
 				</div>
-				{#if space.blocked_services.length > 0}
-					<div class="rows">
-						{#each space.blocked_services as service (service.id)}
-							<button class="row justify-between" disabled={busy} onclick={() => send({ kind: 'service', service: service.id }, askMinutes)}>
-								<span class="font-semibold">{service.label}</span>
-								<span class="muted text-sm">Demander</span>
-							</button>
-						{/each}
-					</div>
-				{/if}
-				<form
-					onsubmit={(e) => {
-						e.preventDefault();
-						if (site.trim()) send({ kind: 'domain', domain: site.trim() }, askMinutes);
-					}}
-				>
-					<label class="label" for="site">Un autre site</label>
-					<div class="flex gap-2">
-						<input id="site" class="field" placeholder="exemple.fr" bind:value={site} autocomplete="off" autocapitalize="off" inputmode="url" />
-						<button class="btn-primary shrink-0" disabled={busy || !site.trim()}>Demander</button>
-					</div>
-				</form>
-			</div>
+				<button class="btn-primary btn-block min-h-14 py-2" disabled={busy || !wanted}>
+					{#if wanted}Demander {wanted.label} pendant {minutes(askMinutes)}{:else}Demander{/if}
+				</button>
+			</form>
 		{/if}
 	</Sheet>
 </div>
+
+<style>
+	/* Un service à demander : son logo en grand, comme sur un écran d'accueil. */
+	.choix {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.5rem;
+		min-height: 6.75rem;
+		padding: 0.85rem 0.3rem 0.7rem;
+		border-radius: 22px;
+		background: var(--bg);
+		font-size: 0.9rem;
+		font-weight: 650;
+		line-height: 1.15;
+		text-align: center;
+		overflow-wrap: anywhere;
+		transition:
+			transform 0.12s ease,
+			background-color 0.15s ease;
+	}
+	.choix:active {
+		transform: scale(0.97);
+	}
+	.choix[aria-checked='true'] {
+		background: var(--sun-soft);
+		box-shadow: inset 0 0 0 3px var(--sun);
+	}
+</style>

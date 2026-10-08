@@ -6,7 +6,7 @@ use crate::state::Shared;
 use crate::util;
 use anyhow::Result;
 use cotutelle_common::stats::DnsStats;
-use cotutelle_common::{FilterContext, Policy, TemporaryGrant, Usage, Verdict, evaluate};
+use cotutelle_common::{FilterContext, Policy, Service, TemporaryGrant, Usage, Verdict, evaluate};
 use cotutelle_dns::{Decision, Handler};
 use std::collections::{BTreeSet, HashMap};
 use std::net::{IpAddr, SocketAddr};
@@ -28,6 +28,8 @@ struct Profile {
 
 pub struct LanFilter {
     profiles: RwLock<HashMap<IpAddr, Profile>>,
+    /// Catalogue des services de la famille.
+    services: RwLock<Vec<Service>>,
     upstreams: RwLock<Vec<SocketAddr>>,
     blocklists: Arc<BlocklistStore>,
     /// Compteurs par (appareil, enfant), vidés chaque minute vers la base.
@@ -38,6 +40,7 @@ impl LanFilter {
     pub fn new(blocklists: Arc<BlocklistStore>) -> Self {
         Self {
             profiles: RwLock::default(),
+            services: RwLock::default(),
             upstreams: RwLock::new(parse_upstreams(DEFAULT_UPSTREAMS)),
             blocklists,
             stats: Mutex::default(),
@@ -73,6 +76,7 @@ impl Handler for LanFilter {
             return Decision::Forward;
         };
         let access = model::access_now(&profile.policy, &profile.grants, profile.usage);
+        let services = self.services.read().expect("verrou services");
         let verdict = self.blocklists.with_loaded(|blocklists| {
             evaluate(
                 name,
@@ -80,6 +84,7 @@ impl Handler for LanFilter {
                     policy: &profile.policy.filter,
                     grants: &profile.grants,
                     blocklists,
+                    services: &services,
                     now: chrono::Utc::now(),
                     access_open: access.open,
                 },
@@ -147,7 +152,9 @@ pub async fn rebuild(state: &Shared) -> Result<()> {
     let blocklists = state.blocklists.clone();
     tokio::task::spawn_blocking(move || blocklists.set_loaded(&categories)).await?;
 
+    let services = model::services(&state.db).await?;
     let upstreams = upstreams_setting(state).await;
+    *state.lan.services.write().expect("verrou services") = services;
     *state.lan.upstreams.write().expect("verrou amonts") = upstreams;
     *state.lan.profiles.write().expect("verrou profils") = profiles;
     Ok(())

@@ -116,6 +116,7 @@ pub async fn device_state(state: &Shared, device_id: &str) -> Result<DeviceState
         issued_at: Utc::now(),
         accounts: out,
         blocklists: state.blocklists.refs_for(&categories),
+        services: model::services(&state.db).await?,
         upstream_dns: lan::upstreams_setting(state).await.iter().map(ToString::to_string).collect(),
     })
 }

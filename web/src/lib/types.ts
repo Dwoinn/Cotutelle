@@ -10,6 +10,8 @@ export type Policy = {
 	filter: {
 		blocked_categories: string[];
 		blocked_services: string[];
+		/** Parmi les services bloqués, ceux que l'enfant peut demander. */
+		requestable_services: string[];
 		allow: string[];
 		deny: string[];
 		youtube_restricted: boolean;
@@ -116,7 +118,27 @@ export type Dashboard = {
 	now: number;
 };
 
-export type Service = { id: string; label: string; icon: string; domains: string[] };
+export type Logo = {
+	url: string;
+	/** Icône pleine et opaque, à afficher bord à bord. */
+	bleed: boolean;
+};
+
+/** Service du catalogue de la famille. */
+export type Service = {
+	id: string;
+	label: string;
+	/** Tous les sites dont le service a besoin ; le premier donne le logo. */
+	domains: string[];
+	/** Fourni avec Cotutelle, par opposition à ajouté par les parents. */
+	builtin: boolean;
+	/** Service fourni dont les parents ont changé le nom ou les sites. */
+	modified: boolean;
+	logo: Logo | null;
+};
+
+/** Ce qu'il faut d'un service pour le nommer et le montrer. */
+export type ServiceBadge = Pick<Service, 'id' | 'label' | 'logo'>;
 
 export type Catalog = {
 	groups: {
@@ -142,7 +164,9 @@ export type ChildSpace = {
 	next_opening: Opening;
 	today_ranges: TimeRange[];
 	grants: Grant[];
-	blocked_services: { id: string; label: string; icon: string }[];
+	/** Les services que l'enfant peut demander, et ceux qui lui sont ouverts. */
+	services: ServiceBadge[];
+	requestable_services: string[];
 	allow_requests: boolean;
 	requests: ChildRequest[];
 	activity: Activity;

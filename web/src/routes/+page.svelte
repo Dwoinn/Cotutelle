@@ -6,6 +6,7 @@
 	import Dial from '#lib/components/Dial.svelte';
 	import FilterSheet from '#lib/components/FilterSheet.svelte';
 	import Segmented from '#lib/components/Segmented.svelte';
+	import ServiceLogo from '#lib/components/ServiceLogo.svelte';
 	import Sheet from '#lib/components/Sheet.svelte';
 	import Shield from '#lib/components/Shield.svelte';
 	import TimeSheet from '#lib/components/TimeSheet.svelte';
@@ -63,6 +64,10 @@
 	const sheetDevice = $derived(shared.find((d) => d.id === deviceId) ?? null);
 	const thisYear = new Date().getFullYear();
 
+	const asked = (request: ChildRequest) => {
+		const target = request.target;
+		return target?.kind === 'service' ? services.find((s) => s.id === target.service) : undefined;
+	};
 	const deviceGrants = (device: Device) => data?.device_grants.filter((g) => g.device_id === device.id) ?? [];
 	const line = (child: ChildSummary) => timeLine(child.status, child.today_ranges ?? [], child.next_opening, minute);
 
@@ -130,12 +135,18 @@
 		{#if data.requests.length > 0 || data.alerts.length > 0}
 			<section class="max-w-2xl space-y-3" aria-label="À traiter">
 				{#each data.requests as request (request.id)}
+					{@const service = asked(request)}
 					<div class="bg-sun text-night rounded-[28px] p-5">
-						<p class="display text-[1.35rem] leading-tight">
-							{request.child_name} demande {request.label}{#if request.minutes}&nbsp;pendant {minutes(request.minutes)}{/if}
-						</p>
-						{#if request.message}<p class="mt-1.5">« {request.message} »</p>{/if}
-						<p class="mt-1 text-sm opacity-70">{ago(request.created_at, now)}</p>
+						<div class="flex items-start gap-3.5">
+							{#if service}<ServiceLogo label={service.label} logo={service.logo} size={50} />{/if}
+							<div class="min-w-0 flex-1">
+								<p class="display text-[1.35rem] leading-tight">
+									{request.child_name} demande {request.label}{#if request.minutes}&nbsp;pendant {minutes(request.minutes)}{/if}
+								</p>
+								{#if request.message}<p class="mt-1.5">« {request.message} »</p>{/if}
+								<p class="mt-1 text-sm opacity-70">{ago(request.created_at, now)}</p>
+							</div>
+						</div>
 						<div class="mt-4 grid grid-cols-2 gap-2">
 							<button class="btn bg-night text-white" onclick={() => approve(request)}>Accorder</button>
 							<button class="btn bg-white/60 text-night" onclick={() => deny(request)}>Refuser</button>

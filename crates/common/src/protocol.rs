@@ -5,7 +5,7 @@
 //! n'a jamais à fusionner des deltas, et sa copie sur disque est directement
 //! la dernière politique connue (D3).
 
-use crate::{BlockReason, ChildId, DeviceId, Policy, TemporaryGrant, Usage};
+use crate::{BlockReason, ChildId, DeviceId, Policy, Service, TemporaryGrant, Usage, catalog};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +39,11 @@ pub struct DeviceState {
     /// Comptes gérés. Un compte absent de cette liste n'est pas filtré.
     pub accounts: Vec<AccountState>,
     pub blocklists: Vec<BlocklistRef>,
+    /// Catalogue des services de la famille. Un état enregistré avant son
+    /// introduction retombe sur les services fournis : sans définition, un
+    /// service bloqué ne bloquerait plus rien (D3).
+    #[serde(default = "catalog::builtin_services")]
+    pub services: Vec<Service>,
     /// Résolveurs amont, sous la forme `ip:port`.
     pub upstream_dns: Vec<String>,
 }
@@ -152,5 +157,13 @@ mod tests {
         let msg: ServerMessage =
             serde_json::from_str(r#"{"type":"lock_now","os_account":"louis"}"#).unwrap();
         assert_eq!(msg, ServerMessage::LockNow { os_account: "louis".into() });
+    }
+
+    #[test]
+    fn state_without_services_falls_back_to_builtin_ones() {
+        let json = r#"{"device":"00000000-0000-4000-8000-000000000000",
+            "issued_at":"2026-10-07T12:00:00Z","accounts":[],"blocklists":[],"upstream_dns":[]}"#;
+        let state: DeviceState = serde_json::from_str(json).unwrap();
+        assert!(state.services.iter().any(|s| s.id == "youtube"));
     }
 }

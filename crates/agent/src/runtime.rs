@@ -115,7 +115,11 @@ impl Handler for Runtime {
     fn decide(&self, _client: IpAddr, name: &str) -> Decision {
         // Personne devant l'écran, ou un compte non géré (un parent) : pas de filtrage.
         let Some(os_account) = self.foreground() else { return Decision::Forward };
-        let Some(account) = self.account(&os_account) else { return Decision::Forward };
+        let state = self.state.read().expect("verrou état");
+        let Some(state) = state.as_ref() else { return Decision::Forward };
+        let Some(account) = state.accounts.iter().find(|a| a.os_account == os_account) else {
+            return Decision::Forward;
+        };
 
         let blocklists = self.blocklists.read().expect("verrou listes");
         let verdict = evaluate(
@@ -124,11 +128,12 @@ impl Handler for Runtime {
                 policy: &account.policy.filter,
                 grants: &account.grants,
                 blocklists: &blocklists,
+                services: &state.services,
                 now: chrono::Utc::now(),
                 // Accès fermé : la session est verrouillée (D4) et, en seconde
                 // barrière si le verrou ne tient pas, le DNS est coupé. Le
                 // serveur reste joignable pour apprendre la réouverture.
-                access_open: self.access(&account, chrono::Local::now()).open
+                access_open: self.access(account, chrono::Local::now()).open
                     || cotutelle_common::normalize_domain(name)
                         == server_host(&self.identity.server),
             },

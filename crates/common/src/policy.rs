@@ -10,8 +10,11 @@ use std::collections::BTreeSet;
 pub struct FilterPolicy {
     /// Catégories de listes bloquées (identifiants UT1, ex. `adult`).
     pub blocked_categories: BTreeSet<String>,
-    /// Services bloqués (identifiants de [`crate::catalog::SERVICES`]).
+    /// Services bloqués (identifiants de [`crate::Service`]).
     pub blocked_services: BTreeSet<String>,
+    /// Parmi les services bloqués, ceux que l'enfant voit dans son espace et
+    /// peut demander à ses parents. Les autres sont bloqués sans être proposés.
+    pub requestable_services: BTreeSet<String>,
     /// Domaines toujours autorisés, prioritaires sur tout le reste.
     pub allow: BTreeSet<String>,
     /// Domaines toujours bloqués, prioritaires sur les catégories.

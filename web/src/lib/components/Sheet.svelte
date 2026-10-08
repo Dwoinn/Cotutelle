@@ -1,3 +1,9 @@
+<script lang="ts" module>
+	// Feuilles ouvertes, de la plus ancienne à la plus récente : quand l'une
+	// en ouvre une autre, Échap ne ferme que celle du dessus.
+	const stack: symbol[] = [];
+</script>
+
 <script lang="ts">
 	import X from '@lucide/svelte/icons/x';
 	import type { Snippet } from 'svelte';
@@ -11,9 +17,14 @@
 	}: { open: boolean; title: string; wide?: boolean; children: Snippet } = $props();
 
 	let panel = $state<HTMLDivElement | null>(null);
+	const self = Symbol();
 
 	function onkeydown(event: KeyboardEvent) {
-		if (open && event.key === 'Escape') open = false;
+		if (open && event.key === 'Escape' && stack.at(-1) === self) {
+			// Les autres feuilles reçoivent le même événement : il est traité.
+			event.stopImmediatePropagation();
+			open = false;
+		}
 	}
 
 	// Fige la page derrière la feuille et y place le focus.
@@ -21,8 +32,10 @@
 		if (!open) return;
 		const previous = document.body.style.overflow;
 		document.body.style.overflow = 'hidden';
+		stack.push(self);
 		panel?.focus();
 		return () => {
+			stack.splice(stack.indexOf(self), 1);
 			document.body.style.overflow = previous;
 		};
 	});
@@ -31,7 +44,8 @@
 <svelte:window {onkeydown} />
 
 {#if open}
-	<div class="fixed inset-0 z-40 flex items-end justify-center sm:items-center sm:p-6">
+	<!-- `m-0` : une feuille ouverte depuis un bloc espacé (`space-y-*`) n'hérite pas de sa marge. -->
+	<div class="fixed inset-0 z-40 m-0 flex items-end justify-center sm:items-center sm:p-6">
 		<button class="scrim absolute inset-0 cursor-default" style:background="var(--scrim)" aria-label="Fermer" onclick={() => (open = false)}></button>
 		<div
 			bind:this={panel}

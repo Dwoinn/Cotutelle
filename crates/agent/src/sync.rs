@@ -139,6 +139,7 @@ async fn apply_state(rt: &Arc<Runtime>, state: DeviceState) {
     tracing::info!(
         accounts = state.accounts.len(),
         lists = state.blocklists.len(),
+        services = state.services.len(),
         "politique reçue"
     );
     *rt.state.write().expect("verrou état") = Some(state);

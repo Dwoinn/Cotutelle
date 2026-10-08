@@ -30,6 +30,9 @@ rouvrent pas sans discussion.
 - Toute route de l'API réservée aux parents prend un extracteur `Parent` ;
   après une modification d'enfant, d'appareil, de politique ou d'exception,
   appeler `state.changed()` pour propager aux agents et au DNS LAN.
+- Les services se lisent par `model::services` côté serveur et dans l'état
+  reçu côté agent, jamais dans `catalog::SERVICES` : ce dernier n'est que le
+  point de départ d'un catalogue que les parents modifient (D17).
 - Les types de `web/src/lib/types.ts` suivent ceux de `cotutelle-common`.
 - Avant de proposer un commit : `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets -- -D warnings`,

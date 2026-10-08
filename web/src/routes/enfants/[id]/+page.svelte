@@ -225,12 +225,12 @@
 				<Switch
 					bind:checked={draft.policy.filter.allow_requests}
 					label="{saved.name} peut faire des demandes"
-					description="Depuis son espace : ouvrir un service ou un site, obtenir du temps. Vous répondez depuis l'accueil."
+					description="Depuis son espace : obtenir du temps, ouvrir un site ou l'un des services réglés « sur demande ». Vous répondez depuis l'accueil."
 				/>
 			</section>
 			<section class="panel">
 				{#if catalog}
-					<FilterEditor bind:filter={draft.policy.filter} {catalog} />
+					<FilterEditor bind:filter={draft.policy.filter} bind:catalog childName={saved.name} />
 				{/if}
 			</section>
 		{:else}

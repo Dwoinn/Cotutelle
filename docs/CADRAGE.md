@@ -87,6 +87,7 @@ plusieurs : deux parents, plusieurs enfants, plusieurs appareils.
 | D14 | **Le serveur envoie toujours l'état complet à l'agent**, jamais de delta. | La copie sur disque de l'agent est directement la dernière politique connue (D3). |
 | D15 | **Licence AGPL-3.0-or-later avec clause d'attribution** (article 7(b)) ; le nom Cotutelle est réservé au projet officiel. Pas de cession de droits des contributeurs, attestation d'origine seulement. | L'objectif est de protéger la paternité, pas un revenu : chacun peut réutiliser et même vendre, à condition de publier son code et de citer le projet. |
 | D16 | **L'agent relaie d'abord vers les DNS annoncés par le réseau**, puis vers les résolveurs configurés. Une réponse négative d'un amont fait essayer le suivant. | Seuls les DNS du réseau connaissent les noms privés : serveur Cotutelle interne, NAS, portail captif. Le filtrage ayant lieu avant le relais, ce choix ne l'affaiblit pas. |
+| D17 | **Le catalogue des services est une donnée de la famille**, distribuée aux agents avec l'état de l'appareil. Les services fournis avec Cotutelle n'en sont que le point de départ. | Un service tient sur plusieurs domaines qui changent sans prévenir : les parents doivent pouvoir compléter une liste, ou ajouter un service, sans attendre une nouvelle version. |
 
 ## 6. Modèle de domaine
 
@@ -100,6 +101,7 @@ Famille
  │   ├─ Compte de session (utilisateur OS) ──→ Enfant
  │   └─ Agent (jeton, version, dernier contact)
  ├─ Profil appareil sans agent (IP/MAC → Politique)
+ ├─ Service (nom, domaines, logo) : fourni, modifié ou ajouté par les parents
  ├─ Exception temporaire (cible, durée, accordée par, pour qui)
  ├─ Demande (enfant → parents : accès à X / N minutes de plus)
  ├─ Session d'écran (appareil, compte, début, fin, inactivité)
@@ -117,6 +119,8 @@ parents non filtré.
 - **Filtres** : catégories UT1 bloquées, services nommés bloqués (YouTube,
   TikTok, Discord…), liste blanche et liste noire personnelles, mode
   restreint YouTube (par CNAME DNS), blocage du DNS-over-HTTPS.
+- **Services** : pour chaque enfant, un service est *autorisé*, *sur demande*
+  (bloqué, mais proposé dans son espace) ou *bloqué* (sans lui être proposé).
 - **Horaires** : plages autorisées par jour de la semaine, distinction
   école / week-end / vacances.
 - **Quota** : minutes par jour, optionnellement par semaine, avec bonus
@@ -191,6 +195,21 @@ parents non filtré.
   de domaines d'UT1 tiennent dans 45 Mo et se chargent en 0,2 s.
 - Allow/deny personnels prioritaires.
 
+### Services
+
+- Un service est un nom et **tous** les domaines dont il a besoin : le site,
+  mais aussi ce qui sert ses vidéos, ses images, son API. Il se bloque et
+  s'ouvre d'un bloc.
+- Le catalogue part des services fournis (`catalog::SERVICES`). Les parents
+  modifient leurs domaines, les rétablissent, ajoutent leurs propres
+  services ; la base ne garde que ces écarts (D17).
+- Un site saisi à la main qui appartient à un service désigne le service
+  entier, pour une ouverture comme pour une demande : ouvrir `youtube.com`
+  seul laisserait les vidéos bloquées sur `googlevideo.com`.
+- Logos : le serveur reprend une fois l'icône du site principal de chaque
+  service et la sert lui-même, l'appareil de l'enfant ne pouvant pas la
+  charger d'un site bloqué. Voir §9.
+
 ### Cas YouTube
 
 - Blocage par domaines (`youtube.com`, `googlevideo.com`, `ytimg.com`, apps).
@@ -219,6 +238,10 @@ pas de titres de vidéos, pas de pages.
   autorisé uniquement sur le réseau local.
 - Agents : jeton par appareil, révocable ; enrôlement à usage unique.
 - Données : rétention paramétrable, export et purge par enfant.
+- Logos des services : le serveur ne contacte que le site du service, en
+  HTTPS, jamais un intermédiaire. Il refuse les adresses IP et tout nom qui
+  mène au réseau local, plafonne la taille lue, vérifie que la réponse est
+  une image et la sert sans qu'elle puisse exécuter quoi que ce soit.
 - Image Docker non root, multi-arch (amd64, arm64 pour Raspberry Pi).
 
 ## 10. Interface
@@ -234,6 +257,7 @@ par assistant, exceptions rapides (« +30 min », « YouTube 1 h »), journal.
 
 **Espace enfant** : temps restant en grand, prochain créneau, bouton « demander
 », ce que mes parents voient, accessible depuis l'appareil sans mot de passe.
+Les services « sur demande » s'y choisissent par leur logo.
 
 **Notifications parents** : ntfy, optionnel (D13).
 

@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 pub async fn catalog(_: Parent, State(state): State<Shared>) -> ApiResult<Value> {
+    let services = super::services::listing(&state).await?;
     let manifest = state.blocklists.manifest();
     let groups: Vec<Value> = catalog::CATEGORY_GROUPS
         .iter()
@@ -33,7 +34,7 @@ pub async fn catalog(_: Parent, State(state): State<Shared>) -> ApiResult<Value>
         .collect();
     Ok(Json(json!({
         "groups": groups,
-        "services": catalog::SERVICES,
+        "services": services,
         "blocklists_ready": !manifest.categories.is_empty(),
     })))
 }

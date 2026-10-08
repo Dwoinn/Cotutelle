@@ -20,7 +20,9 @@ enfants, plusieurs appareils.
 
 - **Filtrage par DNS** : catégories de sites (listes de l'Université Toulouse
   Capitole, 5,7 millions de domaines), services nommés comme YouTube ou
-  TikTok, listes personnelles, mode restreint YouTube.
+  TikTok, listes personnelles, mode restreint YouTube. Un service réunit
+  tous les domaines dont une appli a besoin ; la liste se complète et
+  s'étend depuis l'interface.
 - **Horaires et temps d'écran** par enfant, partagé entre tous ses appareils.
   La session se verrouille après un préavis.
 - **Exceptions en un geste** : « YouTube pendant 1 h », « +30 min », « pause ».

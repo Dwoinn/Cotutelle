@@ -1,7 +1,7 @@
 //! Tâches de fond : statistiques, purge, mise à jour des listes, veille.
 
 use crate::state::Shared;
-use crate::{lan, notify, util};
+use crate::{lan, logos, model, notify, util};
 use anyhow::Result;
 use std::time::Duration;
 
@@ -29,6 +29,10 @@ pub fn spawn(state: Shared) {
             if let Err(e) = housekeeping(&s).await {
                 tracing::error!(error = ?e, "entretien de la base");
             }
+            // Dès le démarrage, puis pour retenter les recherches infructueuses.
+            if let Err(e) = fetch_logos(&s).await {
+                tracing::error!(error = ?e, "récupération des logos des services");
+            }
         }
     });
 
@@ -52,6 +56,11 @@ pub async fn refresh_blocklists(state: &Shared) {
         }
         Err(e) => tracing::error!(error = ?e, "mise à jour des listes impossible"),
     }
+}
+
+async fn fetch_logos(state: &Shared) -> Result<()> {
+    let services = model::services(&state.db).await?;
+    logos::ensure(state, &services).await
 }
 
 async fn housekeeping(state: &Shared) -> Result<()> {
