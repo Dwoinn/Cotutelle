@@ -1,0 +1,209 @@
+name: Paquets
+
+# Construit l'agent pour Linux, Windows et macOS, et l'image Docker du serveur.
+# Une étiquette vX.Y.Z publie en plus la version GitHub et l'image sur
+# ghcr.io ; un lancement manuel construit sans rien publier.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/dwoinn/cotutelle-server
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::L'étiquette $GITHUB_REF_NAME ne correspond pas à la version $version de Cargo.toml"
+            exit 1
+          fi
+
+  # Un binaire lié à une glibc ancienne, décliné en .deb, .rpm et archive.
+  agent-linux:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Binaire
+        run: |
+          docker buildx build -f docker/Dockerfile.agent --output type=local,dest=dist/bin .
+          dist/bin/cotutelle-agent --version
+      # Les scripts de paquets lisent la version avec cargo.
+      - run: rustup show
+      - name: Paquets .deb et .rpm
+        env:
+          AGENT_BIN: dist/bin/cotutelle-agent
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
+          cp "$(scripts/build-deb.sh)" "$(scripts/build-rpm.sh)" dist/
+      - name: Archive pour les autres distributions
+        run: |
+          root="cotutelle-agent-$VERSION-linux-${{ matrix.arch }}"
+          mkdir "$root"
+          cp dist/bin/cotutelle-agent packaging/cotutelle-agent.service packaging/cotutelle.desktop \
+            README.md NOTICE.md LICENSE "$root/"
+          cp web/src/lib/assets/favicon.svg "$root/cotutelle.svg"
+          tar -czf "dist/$root.tar.gz" "$root"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-linux-${{ matrix.arch }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  # Windows et macOS : l'agent s'y compile mais n'y protège encore rien
+  # (phases 2 et 3 du cadrage). Ces binaires vérifient la portabilité et ne
+  # sont pas joints aux versions publiées.
+  agent-apercu:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: cotutelle-agent.exe
+          - name: macos-aarch64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            bin: cotutelle-agent
+          - name: macos-x86_64
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            bin: cotutelle-agent
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      # La version de Rust vient de rust-toolchain.toml.
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo build --release --locked -p cotutelle-agent --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-apercu-${{ matrix.name }}-${{ needs.version.outputs.version }}
+          path: target/${{ matrix.target }}/release/${{ matrix.bin }}
+          if-no-files-found: error
+
+  # Une construction par architecture sur une machine native (l'émulation est
+  # trop lente pour Rust), réunies ensuite sous une même étiquette.
+  image:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.ref_type == 'tag'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.server
+          platforms: linux/${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ github.ref_type == 'tag' }}
+      - name: Empreinte de l'image
+        if: github.ref_type == 'tag'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir digests
+          touch "digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type == 'tag'
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  image-manifest:
+    if: github.ref_type == 'tag'
+    needs: [version, image]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          merge-multiple: true
+          path: digests
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image multi-architecture
+        working-directory: digests
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          docker buildx imagetools create -t "$IMAGE:$VERSION" -t "$IMAGE:latest" \
+            $(printf "$IMAGE@sha256:%s " *)
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [agent-linux, image-manifest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agent-linux-*
+          merge-multiple: true
+          path: dist
+      - name: Sommes de contrôle
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS
+      - name: Version GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "Cotutelle $GITHUB_REF_NAME" --generate-notes --verify-tag

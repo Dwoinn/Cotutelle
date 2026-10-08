@@ -103,17 +103,11 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
 /// Écrit de façon atomique un fichier réservé à son propriétaire.
 fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let tmp = path.with_extension("tmp");
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&tmp)
+    let mut file = crate::platform::create_private(&tmp)
         .with_context(|| format!("écriture de {}", tmp.display()))?;
     file.write_all(bytes)?;
     file.sync_all()?;

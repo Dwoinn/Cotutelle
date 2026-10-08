@@ -96,7 +96,7 @@ web/            interface SvelteKit + Tailwind (parents et enfant)
 packaging/      unité systemd, lanceur et scripts du paquet Debian
 docker/         image du serveur et compose d'exemple
 deploy/         manifestes OpenShift
-scripts/        seed de développement, construction du .deb
+scripts/        seed de développement, construction du .deb et du .rpm
 ```
 
 ## Crédits

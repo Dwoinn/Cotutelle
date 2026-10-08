@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Construit le paquet Debian de l'agent : target/debian/cotutelle-agent_<version>_<arch>.deb
-# Ne dépend que de cargo et de dpkg-deb.
+# Ne dépend que de cargo et de dpkg-deb. AGENT_BIN désigne un binaire déjà
+# compilé (voir docker/Dockerfile.agent) ; sans lui, le script compile l'agent.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -9,10 +10,13 @@ VERSION=$(cargo metadata --no-deps --format-version 1 |
 ARCH=$(dpkg --print-architecture)
 ROOT="target/debian/cotutelle-agent_${VERSION}_${ARCH}"
 
-cargo build --release -p cotutelle-agent
+if [ -z "${AGENT_BIN:-}" ]; then
+  cargo build --release -p cotutelle-agent
+  AGENT_BIN=target/release/cotutelle-agent
+fi
 
 rm -rf "$ROOT"
-install -D -m 0755 target/release/cotutelle-agent "$ROOT/usr/bin/cotutelle-agent"
+install -D -m 0755 "$AGENT_BIN" "$ROOT/usr/bin/cotutelle-agent"
 install -D -m 0644 packaging/cotutelle-agent.service "$ROOT/usr/lib/systemd/system/cotutelle-agent.service"
 install -D -m 0644 packaging/cotutelle.desktop "$ROOT/usr/share/applications/cotutelle.desktop"
 install -D -m 0644 web/src/lib/assets/favicon.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/cotutelle.svg"

@@ -163,25 +163,12 @@ async fn run(
         result = local::serve(rt.clone(), local_addr) => result.context("serveur local")?,
         () = sync::run(rt.clone()) => {}
         () = watch::run(rt.clone(), enforced) => {}
-        () = shutdown_signal() => tracing::info!("arrêt demandé"),
+        () = platform::shutdown_signal() => tracing::info!("arrêt demandé"),
     }
 
     // Dernière sauvegarde du temps d'écran avant de quitter.
     rt.paths.save_usage(&rt.usage.lock().expect("verrou temps"))?;
     Ok(())
-}
-
-/// Attend SIGINT ou SIGTERM, ce dernier étant celui qu'envoie systemd.
-async fn shutdown_signal() {
-    use tokio::signal::unix::{SignalKind, signal};
-    let Ok(mut terminate) = signal(SignalKind::terminate()) else {
-        let _ = tokio::signal::ctrl_c().await;
-        return;
-    };
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        _ = terminate.recv() => {}
-    }
 }
 
 async fn status(local_addr: SocketAddr) -> Result<()> {

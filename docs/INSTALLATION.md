@@ -74,12 +74,17 @@ d'administration** pour l'enfant. Cible principale : Ubuntu avec GNOME.
 Essayé en réel sur Omarchy (Arch Linux, Hyprland) ; pas encore sur Ubuntu :
 faites le premier essai sur une machine de test.
 
-Sous Debian et Ubuntu :
+Chaque [version publiée](https://github.com/Dwoinn/cotutelle/releases) fournit
+l'agent pour x86_64 et aarch64, lié à la glibc 2.28 (Debian 10, Ubuntu 20.04,
+RHEL 8 et suivants) :
 
 ```bash
-scripts/build-deb.sh
-sudo apt install ./target/debian/cotutelle-agent_*.deb
+sudo apt install ./cotutelle-agent_*.deb    # Debian, Ubuntu
+sudo dnf install ./cotutelle-agent-*.rpm    # Fedora, RHEL, openSUSE (zypper)
 ```
+
+Pour construire le paquet depuis les sources : `scripts/build-deb.sh` ou
+`scripts/build-rpm.sh`.
 
 Dans l'interface : **Appareils › Ajouter un ordinateur**. Un code s'affiche,
 valable 15 minutes. Sur l'ordinateur :
@@ -89,9 +94,10 @@ sudo cotutelle-agent enroll --server http://<adresse du serveur>:8080 --code XXX
 sudo systemctl enable --now cotutelle-agent
 ```
 
-Sous une autre distribution, copiez le binaire `cotutelle-agent` dans
-`/usr/bin` et `packaging/cotutelle-agent.service` dans `/etc/systemd/system`,
-puis suivez les mêmes étapes.
+Sous une autre distribution, l'archive `cotutelle-agent-*-linux-*.tar.gz`
+contient le binaire `cotutelle-agent`, à copier dans `/usr/bin`, et
+`cotutelle-agent.service`, à copier dans `/etc/systemd/system` ; suivez
+ensuite les mêmes étapes.
 
 De retour dans l'interface, indiquez quel compte de l'ordinateur appartient à
 quel enfant. Un compte laissé sur « Non filtré » n'est soumis à aucune règle :
