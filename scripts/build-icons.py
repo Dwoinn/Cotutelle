@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""Génère les icônes PNG de l'application à partir de la géométrie du logo.
+"""Génère les images PNG du projet à partir de la géométrie du logo.
 
 Le logo est décrit une seule fois, dans web/static/icon.svg ; ce script en
-reprend les coordonnées pour les formats qui exigent du PNG (écran d'accueil
-iOS et Android). Usage : scripts/build-icons.py, depuis la racine du dépôt.
-Dépendance : Pillow.
+reprend les coordonnées pour les formats qui exigent du PNG : icônes d'écran
+d'accueil (iOS, Android) et image d'aperçu du dépôt.
+
+Usage : scripts/build-icons.py, depuis la racine du dépôt.
+Dépendances : Pillow, et les polices installées par `pnpm install` dans web/.
 """
 from pathlib import Path
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 NIGHT, WHITE, SUN = (22, 32, 58), (255, 255, 255), (255, 197, 61)
-OUT = Path(__file__).resolve().parent.parent / "web" / "static"
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "web" / "static"
+MIST = (158, 171, 198)
+FONTS = ROOT / "web" / "node_modules" / "@fontsource-variable"
+DISPLAY = FONTS / "bricolage-grotesque" / "files" / "bricolage-grotesque-latin-wdth-normal.woff2"
+TEXT = FONTS / "atkinson-hyperlegible-next" / "files" / "atkinson-hyperlegible-next-latin-wght-normal.woff2"
 SS = 4  # suréchantillonnage, pour des bords lisses
 
 
@@ -68,6 +75,36 @@ def render(size, scale):
     return image.resize((size, size), Image.LANCZOS)
 
 
+def social_preview():
+    """Image d'aperçu du dépôt, au format attendu par GitHub : 1280 × 640.
+
+    À déposer à la main dans Settings › General › Social preview : GitHub ne
+    propose pas d'API pour cette image.
+    """
+    w, h, ss = 1280, 640, 2
+    image = Image.new("RGB", (w * ss, h * ss), NIGHT)
+    draw = ImageDraw.Draw(image)
+
+    mark = 300 * ss
+    left = 150 * ss
+    image.paste(render(mark, 0.92), (left, (h * ss - mark) // 2))
+
+    title = ImageFont.truetype(str(DISPLAY), 148 * ss)
+    title.set_variation_by_axes([700, 84])  # graisse, largeur
+    body = ImageFont.truetype(str(TEXT), 40 * ss)
+    body.set_variation_by_axes([450])
+
+    x = left + mark + 44 * ss
+    draw.text((x, 196 * ss), "Cotutelle", font=title, fill=WHITE)
+    draw.text((x + 6 * ss, 372 * ss), "Le temps d’écran et le filtrage,", font=body, fill=MIST)
+    draw.text((x + 6 * ss, 424 * ss), "pour toute la famille.", font=body, fill=MIST)
+
+    target = ROOT / "docs" / "assets" / "social-preview.png"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    image.resize((w, h), Image.LANCZOS).save(target, optimize=True)
+    return target
+
+
 if __name__ == "__main__":
     # Icônes plein cadre : le système arrondit lui-même les coins.
     for size in (180, 192, 512):
@@ -75,3 +112,4 @@ if __name__ == "__main__":
     # Icône masquable : le motif tient dans la zone sûre centrale.
     render(512, 0.56).save(OUT / "icon-maskable-512.png", optimize=True)
     print("icônes écrites dans", OUT)
+    print("aperçu du dépôt écrit dans", social_preview())

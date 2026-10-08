@@ -1,4 +1,7 @@
-# Cotutelle
+<h1 align="center">
+  <img src="web/static/icon.svg" width="112" alt="Logo de Cotutelle : deux moitiés de bouclier autour d’un cadran"><br>
+  Cotutelle
+</h1>
 
 Contrôle parental libre, multi-enfants et multi-appareils, piloté depuis une
 interface web sur le réseau local. Réécriture inspirée de
