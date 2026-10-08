@@ -15,11 +15,16 @@ mod util;
 
 use anyhow::{Context, Result};
 use axum::Router;
+use axum::extract::Request;
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderValue, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use clap::Parser;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use state::{AppState, Config, Shared};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -55,7 +60,7 @@ struct Cli {
     secure_cookies: bool,
 }
 
-async fn open_database(data_dir: &std::path::Path) -> Result<sqlx::SqlitePool> {
+async fn open_database(data_dir: &Path) -> Result<sqlx::SqlitePool> {
     let options = SqliteConnectOptions::new()
         .filename(data_dir.join("cotutelle.db"))
         .create_if_missing(true)
@@ -67,13 +72,41 @@ async fn open_database(data_dir: &std::path::Path) -> Result<sqlx::SqlitePool> {
     Ok(pool)
 }
 
-fn app(state: Shared, web_dir: &std::path::Path) -> Router {
+/// Fichiers au nom haché par la compilation : leur contenu ne change jamais.
+const IMMUTABLE_PREFIX: &str = "/_app/immutable/";
+const CACHE_IMMUTABLE: HeaderValue =
+    HeaderValue::from_static("public, max-age=31536000, immutable");
+const CACHE_REVALIDATE: HeaderValue = HeaderValue::from_static("no-cache");
+
+/// Politique de cache de l'interface web. Seuls les fichiers hachés se gardent
+/// indéfiniment ; tout le reste, index.html en tête, se revalide à chaque
+/// chargement. Sans cela le navigateur garde après une mise à jour un ancien
+/// index.html, qui référence des fichiers hachés disparus.
+async fn cache_policy(req: Request, next: Next) -> Response {
+    let hashed = req.uri().path().starts_with(IMMUTABLE_PREFIX);
+    let mut res = next.run(req).await;
+    let found = res.status().is_success() || res.status() == StatusCode::NOT_MODIFIED;
+    let value = if hashed && found { CACHE_IMMUTABLE } else { CACHE_REVALIDATE };
+    res.headers_mut().insert(CACHE_CONTROL, value);
+    res
+}
+
+fn web(web_dir: &Path) -> Router {
     // Interface monopage : toute route inconnue rend index.html.
-    let web = ServeDir::new(web_dir).fallback(ServeFile::new(web_dir.join("index.html")));
+    let pages = ServeDir::new(web_dir).fallback(ServeFile::new(web_dir.join("index.html")));
+    Router::new()
+        // Sauf sous /_app : un fichier absent y est une vraie 404, pas une
+        // page HTML rendue à la place d'un script.
+        .nest_service("/_app", ServeDir::new(web_dir.join("_app")))
+        .fallback_service(pages)
+        .layer(middleware::from_fn(cache_policy))
+}
+
+fn app(state: Shared, web_dir: &Path) -> Router {
     Router::new()
         .nest("/api/v1", api::router())
         .route("/healthz", axum::routing::get(|| async { "ok" }))
-        .fallback_service(web)
+        .fallback_service(web(web_dir))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -126,4 +159,42 @@ async fn main() -> Result<()> {
     })
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn web_cache_policy() {
+        let dir = std::env::temp_dir().join(format!("cotutelle-web-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("_app/immutable/entry")).unwrap();
+        for file in
+            ["index.html", "icon.svg", "_app/version.json", "_app/immutable/entry/start.new.js"]
+        {
+            std::fs::write(dir.join(file), "").unwrap();
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(axum::serve(listener, web(&dir)).into_future());
+
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let expected = [
+            ("/", 200, CACHE_REVALIDATE),
+            ("/index.html", 200, CACHE_REVALIDATE),
+            // Route de l'application : repli sur index.html.
+            ("/enfants/x", 200, CACHE_REVALIDATE),
+            ("/icon.svg", 200, CACHE_REVALIDATE),
+            ("/_app/version.json", 200, CACHE_REVALIDATE),
+            ("/_app/immutable/entry/start.new.js", 200, CACHE_IMMUTABLE),
+            // Fichier d'une version précédente : ni repli, ni cache long.
+            ("/_app/immutable/entry/start.old.js", 404, CACHE_REVALIDATE),
+        ];
+        for (path, status, cache) in expected {
+            let res = client.get(format!("{base}{path}")).send().await.unwrap();
+            assert_eq!(res.status().as_u16(), status, "{path}");
+            assert_eq!(res.headers().get(CACHE_CONTROL), Some(&cache), "{path}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
