@@ -177,8 +177,11 @@ parents non filtré.
 
 - Compte enfant sans sudo, agent en service systemd root durci.
 - systemd-resolved est pointé sur le résolveur local de l'agent
-  (`127.0.0.1:5354`). nftables : seuls root et la boucle locale peuvent
-  sortir en 53/853, tout autre DNS direct est rejeté.
+  (`127.0.0.1:5354`). nftables : le DNS en clair d'un compte ordinaire est
+  détourné vers ce résolveur quel que soit le serveur annoncé par
+  `resolv.conf` (stub de systemd-resolved désactivé, fichier statique,
+  adresse codée en dur) ; le DNS sur TLS et ce qui n'a pu être détourné sont
+  rejetés. Root et la boucle locale restent libres.
 - Blocage du canari `use-application-dns.net` et des fournisseurs DoH connus ;
   politique d'entreprise Firefox/Chrome désactivant le DNS sécurisé.
 - Détection : changement de `resolv.conf`/NetworkManager, arrêt du service,
@@ -337,8 +340,18 @@ publics, qui ignorent les noms privés, et ne retrouvait donc plus son propre
 serveur. Il relaie désormais d'abord vers les DNS annoncés par le réseau, les
 résolveurs configurés servant de secours (D16).
 
-**Reste à vérifier** : tout le parcours sous Ubuntu et GNOME, l'installation
-du paquet `.deb`.
+**Essai réel du 14 octobre 2026**, sur l'ordinateur familial sous Ubuntu
+24.04 (GNOME, Wayland), paquet `.deb` installé : enrôlement, réception de la
+politique, verrouillage de la session par logind et notifications vérifiés.
+Il a révélé un septième défaut : la machine avait `DNSStubListener=no` dans
+`resolved.conf` (dnscrypt-proxy installé), `/etc/resolv.conf` annonçait donc
+le routeur et non le stub `127.0.0.53`, et la règle nftables rejetait le DNS
+de tous les comptes ordinaires, parent compris : plus aucune résolution de
+nom, espace enfant inaccessible. L'agent détourne désormais le DNS en clair
+des comptes ordinaires vers son résolveur au lieu de le rejeter.
+
+**Reste à vérifier** : le parcours complet sous Ubuntu et GNOME après cette
+correction.
 
 Limites assumées du MVP :
 

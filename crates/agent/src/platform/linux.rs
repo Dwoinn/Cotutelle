@@ -289,13 +289,27 @@ pub(crate) fn resolved_dropin(resolver: SocketAddr) -> String {
     )
 }
 
-/// Règles nftables : seuls root (l'agent) et la boucle locale peuvent parler
-/// DNS. Tout autre trafic DNS sortant, en clair ou sur TLS, est rejeté.
-pub(crate) fn nft_ruleset() -> String {
+/// Règles nftables. Root (l'agent) et la boucle locale parlent DNS
+/// librement. Pour tout autre compte, le DNS en clair est détourné vers le
+/// résolveur de l'agent, quel que soit le serveur que `resolv.conf` annonce :
+/// stub de systemd-resolved désactivé (`DNSStubListener=no`), fichier
+/// statique, adresse codée en dur dans un programme. Ce qui ne peut pas être
+/// détourné (DNS sur TLS, autre famille d'adresses que le résolveur) est
+/// rejeté.
+pub(crate) fn nft_ruleset(resolver: SocketAddr) -> String {
+    let (family, dnat) =
+        if resolver.is_ipv4() { ("ipv4", "dnat ip") } else { ("ipv6", "dnat ip6") };
     format!(
         "table inet {NFT_TABLE}\n\
          delete table inet {NFT_TABLE}\n\
          table inet {NFT_TABLE} {{\n\
+         \tchain nat_output {{\n\
+         \t\ttype nat hook output priority -100; policy accept;\n\
+         \t\toifname \"lo\" accept\n\
+         \t\tmeta skuid 0 accept\n\
+         \t\tmeta nfproto {family} udp dport 53 {dnat} to {resolver}\n\
+         \t\tmeta nfproto {family} tcp dport 53 {dnat} to {resolver}\n\
+         \t}}\n\
          \tchain output {{\n\
          \t\ttype filter hook output priority filter; policy accept;\n\
          \t\toifname \"lo\" accept\n\
@@ -438,7 +452,7 @@ impl Platform for Linux {
         restart_resolved()?;
 
         let rules = std::env::temp_dir().join("cotutelle.nft");
-        std::fs::write(&rules, nft_ruleset())?;
+        std::fs::write(&rules, nft_ruleset(resolver))?;
         let applied = run("nft", &["-f", &rules.to_string_lossy()]);
         let _ = std::fs::remove_file(&rules);
         applied?;
@@ -592,11 +606,26 @@ mod tests {
     fn generated_configuration_is_stable() {
         let dropin = resolved_dropin("127.0.0.1:5354".parse().unwrap());
         assert!(dropin.contains("DNS=127.0.0.1:5354\n") && dropin.contains("Domains=~.\n"));
-        let rules = nft_ruleset();
+        let rules = nft_ruleset("127.0.0.1:5354".parse().unwrap());
         assert!(
             rules.contains("meta skuid 0 accept") && rules.contains("udp dport { 53, 853 } reject")
         );
         // La table est déclarée avant d'être supprimée : le script est rejouable.
         assert!(rules.starts_with("table inet cotutelle\ndelete table inet cotutelle\n"));
+    }
+
+    #[test]
+    fn plain_dns_of_ordinary_accounts_is_redirected_to_the_resolver() {
+        // Détournement avant rejet : la chaîne `nat` précède la chaîne `filter`.
+        let rules = nft_ruleset("127.0.0.1:5354".parse().unwrap());
+        let nat = rules.find("type nat hook output priority -100").unwrap();
+        let filter = rules.find("type filter hook output").unwrap();
+        assert!(nat < filter);
+        assert!(rules.contains("meta nfproto ipv4 udp dport 53 dnat ip to 127.0.0.1:5354\n"));
+        assert!(rules.contains("meta nfproto ipv4 tcp dport 53 dnat ip to 127.0.0.1:5354\n"));
+        // Un résolveur IPv6 détourne le DNS IPv6 ; l'autre famille reste rejetée.
+        let v6 = nft_ruleset("[::1]:5354".parse().unwrap());
+        assert!(v6.contains("meta nfproto ipv6 udp dport 53 dnat ip6 to [::1]:5354\n"));
+        assert!(!v6.contains("dnat ip to"));
     }
 }
