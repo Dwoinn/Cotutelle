@@ -4,6 +4,7 @@ mod api;
 mod auth;
 mod blocklists;
 mod error;
+mod holidays;
 mod hub;
 mod lan;
 mod logos;

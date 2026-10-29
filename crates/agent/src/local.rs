@@ -63,6 +63,7 @@ async fn open(State(rt): State<Arc<Runtime>>) -> Response {
 
 async fn status(State(rt): State<Arc<Runtime>>) -> Json<Value> {
     let now = Local::now();
+    let holidays = rt.holidays();
     let accounts: Vec<Value> = rt
         .managed_accounts()
         .iter()
@@ -75,7 +76,7 @@ async fn status(State(rt): State<Arc<Runtime>>) -> Json<Value> {
             json!({
                 "os_account": account.os_account,
                 "child": account.child_name,
-                "access": rt.access(account, now),
+                "access": rt.access(account, &holidays, now),
                 "local_seconds_today": local,
                 "grants": account.grants.len(),
             })

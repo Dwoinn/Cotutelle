@@ -1,6 +1,6 @@
 //! Évaluation de l'accès : horaires, quota et exceptions de temps.
 
-use crate::policy::{GrantTarget, Policy, TemporaryGrant};
+use crate::policy::{GrantTarget, Rules, TemporaryGrant};
 use chrono::{DateTime, NaiveTime, Utc, Weekday};
 use serde::{Deserialize, Serialize};
 
@@ -41,10 +41,11 @@ fn min_opt(a: Option<u32>, b: Option<u32>) -> Option<u32> {
 
 /// Détermine si l'accès est ouvert à cet instant et pour combien de temps.
 ///
-/// `day` et `time` sont l'heure locale de l'appareil ; `now` sert uniquement
-/// à savoir quelles exceptions sont actives.
+/// `rules` sont celles du jour ([`crate::Policy::rules_on`]) ; `day` et
+/// `time` sont l'heure locale de l'appareil ; `now` sert uniquement à savoir
+/// quelles exceptions sont actives.
 pub fn evaluate_access(
-    policy: &Policy,
+    rules: Rules<'_>,
     grants: &[TemporaryGrant],
     now: DateTime<Utc>,
     day: Weekday,
@@ -59,8 +60,8 @@ pub fn evaluate_access(
             _ => None,
         })
         .sum();
-    let quota_today = policy.quota.daily_minutes.map(|q| q + extra);
-    let quota_week = policy.quota.weekly_minutes.map(|q| q + extra);
+    let quota_today = rules.quota.daily_minutes.map(|q| q + extra);
+    let quota_week = rules.quota.weekly_minutes.map(|q| q + extra);
 
     // Fin de l'exception « ignorer les horaires » la plus tardive, en minutes.
     let schedule_override = active()
@@ -68,7 +69,7 @@ pub fn evaluate_access(
         .map(|g| (g.expires_at - now).num_minutes().max(0) as u32)
         .max();
 
-    let in_schedule = policy.schedule.minutes_until_close(day, time);
+    let in_schedule = rules.schedule.minutes_until_close(day, time);
     // Au-delà d'une journée, la fin de plage n'est pas une limite à annoncer.
     let no_limit_in_sight = |m: u32| m > 24 * 60;
     let mut status = AccessStatus {
@@ -121,9 +122,10 @@ pub fn evaluate_access(
 mod tests {
     use super::*;
     use crate::GrantId;
-    use crate::policy::Quota;
+    use crate::holidays::HolidayPeriod;
+    use crate::policy::{HolidayPolicy, Policy, Quota};
     use crate::schedule::{TimeRange, WeeklySchedule};
-    use chrono::Duration;
+    use chrono::{Duration, NaiveDate};
 
     fn t(h: u32, m: u32) -> NaiveTime {
         NaiveTime::from_hms_opt(h, m, 0).unwrap()
@@ -156,7 +158,14 @@ mod tests {
     #[test]
     fn open_inside_schedule_with_quota_left() {
         let now = Utc::now();
-        let s = evaluate_access(&policy(Some(60)), &[], now, Weekday::Wed, t(15, 0), usage(20));
+        let s = evaluate_access(
+            policy(Some(60)).school_rules(),
+            &[],
+            now,
+            Weekday::Wed,
+            t(15, 0),
+            usage(20),
+        );
         assert!(s.open);
         assert_eq!(s.remaining_minutes, Some(40));
         assert_eq!(s.quota_today_minutes, Some(60));
@@ -165,16 +174,37 @@ mod tests {
     #[test]
     fn schedule_end_caps_remaining_time() {
         let now = Utc::now();
-        let s = evaluate_access(&policy(Some(120)), &[], now, Weekday::Wed, t(17, 45), usage(0));
+        let s = evaluate_access(
+            policy(Some(120)).school_rules(),
+            &[],
+            now,
+            Weekday::Wed,
+            t(17, 45),
+            usage(0),
+        );
         assert_eq!(s.remaining_minutes, Some(15));
     }
 
     #[test]
     fn closed_outside_schedule_and_on_quota() {
         let now = Utc::now();
-        let s = evaluate_access(&policy(Some(60)), &[], now, Weekday::Thu, t(15, 0), usage(0));
+        let s = evaluate_access(
+            policy(Some(60)).school_rules(),
+            &[],
+            now,
+            Weekday::Thu,
+            t(15, 0),
+            usage(0),
+        );
         assert_eq!((s.open, s.reason), (false, Some(ClosedReason::OutsideSchedule)));
-        let s = evaluate_access(&policy(Some(60)), &[], now, Weekday::Wed, t(15, 0), usage(60));
+        let s = evaluate_access(
+            policy(Some(60)).school_rules(),
+            &[],
+            now,
+            Weekday::Wed,
+            t(15, 0),
+            usage(60),
+        );
         assert_eq!((s.open, s.reason), (false, Some(ClosedReason::DailyQuota)));
         assert_eq!(s.remaining_minutes, Some(0));
     }
@@ -183,7 +213,14 @@ mod tests {
     fn extra_minutes_extend_quota() {
         let now = Utc::now();
         let g = [grant(GrantTarget::ExtraMinutes { minutes: 30 }, now, 600)];
-        let s = evaluate_access(&policy(Some(60)), &g, now, Weekday::Wed, t(15, 0), usage(60));
+        let s = evaluate_access(
+            policy(Some(60)).school_rules(),
+            &g,
+            now,
+            Weekday::Wed,
+            t(15, 0),
+            usage(60),
+        );
         assert!(s.open);
         assert_eq!(s.remaining_minutes, Some(30));
         assert_eq!(s.quota_today_minutes, Some(90));
@@ -193,7 +230,8 @@ mod tests {
     fn ignore_schedule_opens_until_grant_expires() {
         let now = Utc::now();
         let g = [grant(GrantTarget::IgnoreSchedule, now, 45)];
-        let s = evaluate_access(&policy(None), &g, now, Weekday::Thu, t(21, 0), usage(0));
+        let s =
+            evaluate_access(policy(None).school_rules(), &g, now, Weekday::Thu, t(21, 0), usage(0));
         assert!(s.open);
         assert!(matches!(s.remaining_minutes, Some(44..=45)));
     }
@@ -202,7 +240,8 @@ mod tests {
     fn pause_closes_even_inside_schedule() {
         let now = Utc::now();
         let g = [grant(GrantTarget::Pause, now, 30)];
-        let s = evaluate_access(&policy(None), &g, now, Weekday::Wed, t(15, 0), usage(0));
+        let s =
+            evaluate_access(policy(None).school_rules(), &g, now, Weekday::Wed, t(15, 0), usage(0));
         assert_eq!((s.open, s.reason), (false, Some(ClosedReason::Paused)));
     }
 
@@ -210,8 +249,37 @@ mod tests {
     fn no_limits_means_no_remaining() {
         let now = Utc::now();
         let p = Policy { schedule: WeeklySchedule::always(), ..Default::default() };
-        let s = evaluate_access(&p, &[], now, Weekday::Sun, t(12, 0), usage(500));
+        let s = evaluate_access(p.school_rules(), &[], now, Weekday::Sun, t(12, 0), usage(500));
         assert!(s.open);
         assert_eq!(s.remaining_minutes, None);
+    }
+
+    #[test]
+    fn holiday_rules_apply_only_inside_a_period() {
+        let now = Utc::now();
+        let d = |m, d| NaiveDate::from_ymd_opt(2026, m, d).unwrap();
+        let periods =
+            [HolidayPeriod { label: "Toussaint".into(), start: d(10, 17), end: d(11, 1) }];
+        let p = Policy {
+            holidays: Some(HolidayPolicy {
+                schedule: WeeklySchedule::always(),
+                quota: Quota { daily_minutes: Some(180), weekly_minutes: None },
+                ..Default::default()
+            }),
+            ..policy(Some(60))
+        };
+        // Un jeudi de vacances : horaires et quota des vacances.
+        let rules = p.rules_on(d(10, 22), &periods);
+        assert_eq!(rules.holiday.map(|h| h.label.as_str()), Some("Toussaint"));
+        let s = evaluate_access(rules, &[], now, Weekday::Thu, t(15, 0), usage(100));
+        assert!(s.open);
+        assert_eq!(s.remaining_minutes, Some(80));
+        // Le lundi de la rentrée : règles de période scolaire.
+        let rules = p.rules_on(d(11, 2), &periods);
+        assert!(rules.holiday.is_none());
+        let s = evaluate_access(rules, &[], now, Weekday::Mon, t(15, 0), usage(0));
+        assert_eq!(s.reason, Some(ClosedReason::OutsideSchedule));
+        // Sans règles de vacances, une période ne change rien.
+        assert!(policy(None).rules_on(d(10, 22), &periods).holiday.is_none());
     }
 }

@@ -5,7 +5,9 @@
 //! n'a jamais à fusionner des deltas, et sa copie sur disque est directement
 //! la dernière politique connue (D3).
 
-use crate::{BlockReason, ChildId, DeviceId, Policy, Service, TemporaryGrant, Usage, catalog};
+use crate::{
+    BlockReason, ChildId, DeviceId, HolidayPeriod, Policy, Service, TemporaryGrant, Usage, catalog,
+};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +48,10 @@ pub struct DeviceState {
     pub services: Vec<Service>,
     /// Résolveurs amont, sous la forme `ip:port`.
     pub upstream_dns: Vec<String>,
+    /// Périodes de vacances scolaires de la famille, pour appliquer les
+    /// règles de vacances sans le serveur (D3).
+    #[serde(default)]
+    pub holidays: Vec<HolidayPeriod>,
 }
 
 /// Envoyé par le serveur à l'agent.

@@ -6,19 +6,46 @@ export const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'sa
 export type Day = (typeof DAYS)[number];
 export type Schedule = Record<Day, TimeRange[]>;
 
+export type FilterPolicy = {
+	blocked_categories: string[];
+	blocked_services: string[];
+	/** Parmi les services bloqués, ceux que l'enfant peut demander. */
+	requestable_services: string[];
+	allow: string[];
+	deny: string[];
+	youtube_restricted: boolean;
+	allow_requests: boolean;
+};
+
+export type Quota = { daily_minutes: number | null; weekly_minutes: number | null };
+
+/** Règles propres aux vacances scolaires. */
+export type HolidayPolicy = { filter: FilterPolicy; schedule: Schedule; quota: Quota };
+
 export type Policy = {
-	filter: {
-		blocked_categories: string[];
-		blocked_services: string[];
-		/** Parmi les services bloqués, ceux que l'enfant peut demander. */
-		requestable_services: string[];
-		allow: string[];
-		deny: string[];
-		youtube_restricted: boolean;
-		allow_requests: boolean;
-	};
+	filter: FilterPolicy;
 	schedule: Schedule;
-	quota: { daily_minutes: number | null; weekly_minutes: number | null };
+	quota: Quota;
+	/** Absent : les règles de période scolaire valent toute l'année. */
+	holidays: HolidayPolicy | null;
+};
+
+/** Période de vacances, dates locales « AAAA-MM-JJ », fin incluse. */
+export type HolidayPeriod = { label: string; start: string; end: string };
+
+/** La période de vacances dont les règles s'appliquent aujourd'hui. */
+export type Holiday = { label: string; end: string } | null;
+
+export type HolidaySettings = {
+	zone: string;
+	zones: string[];
+	fetched_at: number | null;
+	calendar: HolidayPeriod[];
+	/** Premiers jours des périodes du calendrier écartées. */
+	removed: string[];
+	added: HolidayPeriod[];
+	periods: HolidayPeriod[];
+	warning: string | null;
 };
 
 export type GrantTarget =
@@ -100,6 +127,7 @@ export type ChildSummary = {
 	used_today_seconds: number;
 	used_week_seconds: number;
 	today_ranges?: TimeRange[];
+	holiday?: Holiday;
 	blocked_today?: number;
 	next_opening: Opening;
 	grants: Grant[];
@@ -165,6 +193,7 @@ export type ChildSpace = {
 	used_today_seconds: number;
 	next_opening: Opening;
 	today_ranges: TimeRange[];
+	holiday?: Holiday;
 	grants: Grant[];
 	/** Les services que l'enfant peut demander, et ceux qui lui sont ouverts. */
 	services: ServiceBadge[];

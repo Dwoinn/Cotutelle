@@ -77,9 +77,10 @@ pub fn step(
     }
 
     let mut actions = Vec::new();
+    let holidays = rt.holidays();
     for session in sessions.iter().filter(|s| s.in_use()) {
         let Some(account) = rt.account(&session.user) else { continue };
-        let status: AccessStatus = rt.access(&account, now);
+        let status: AccessStatus = rt.access(&account, &holidays, now);
         let memo = warned.entry(session.user.clone()).or_default();
 
         if !status.open {
@@ -287,7 +288,8 @@ mod tests {
     use cotutelle_common::protocol::{AccountState, DeviceState};
     use cotutelle_common::schedule::WeeklySchedule;
     use cotutelle_common::{
-        ChildId, DeviceId, GrantId, GrantTarget, Policy, Quota, TemporaryGrant, Usage,
+        ChildId, DeviceId, GrantId, GrantTarget, HolidayPeriod, HolidayPolicy, Policy, Quota,
+        TemporaryGrant, Usage,
     };
 
     struct NoPlatform;
@@ -356,6 +358,7 @@ mod tests {
                 blocklists: vec![],
                 services: vec![],
                 upstream_dns: vec![],
+                holidays: vec![],
             })
             .into(),
             blocklists: Default::default(),
@@ -394,6 +397,35 @@ mod tests {
         step(&rt, &[session("louis", true, false)], 5, noon(), &mut warned);
         assert_eq!(used(&rt), 5, "ni l'inactivité ni l'écran verrouillé ne comptent");
         assert_eq!(rt.foreground(), None, "une session verrouillée n'est pas au premier plan");
+    }
+
+    #[test]
+    fn holiday_rules_come_from_the_last_known_state() {
+        // Quota de 60 min à l'école, 180 en vacances ; le 7 octobre est en vacances.
+        let rt = runtime(60, vec![], 0);
+        {
+            let mut state = rt.state.write().unwrap();
+            let state = state.as_mut().unwrap();
+            state.accounts[0].policy.holidays = Some(HolidayPolicy {
+                schedule: WeeklySchedule::always(),
+                quota: Quota { daily_minutes: Some(180), weekly_minutes: None },
+                ..Default::default()
+            });
+            state.holidays = vec![HolidayPeriod {
+                label: "Essai".into(),
+                start: noon().date_naive(),
+                end: noon().date_naive(),
+            }];
+            state.accounts[0].usage_elsewhere.today_minutes = 100;
+        }
+        let mut warned = HashMap::new();
+        // Sans serveur, l'agent applique les règles de vacances de son état.
+        let actions = step(&rt, &[session("louis", false, false)], 5, noon(), &mut warned);
+        assert!(actions.is_empty(), "100 min sur 180 : rien à signaler");
+        // Le lendemain, hors période : le quota scolaire est dépassé.
+        let tomorrow = noon() + chrono::Duration::days(1);
+        let actions = step(&rt, &[session("louis", false, false)], 5, tomorrow, &mut warned);
+        assert!(matches!(actions.as_slice(), [Action::Notify(..), Action::Lock(_)]));
     }
 
     #[test]

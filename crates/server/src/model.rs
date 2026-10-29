@@ -6,8 +6,8 @@ use chrono::{Datelike, Local, NaiveTime};
 use cotutelle_common::catalog;
 use cotutelle_common::schedule::{TimeRange, WeeklySchedule};
 use cotutelle_common::{
-    AccessStatus, FilterPolicy, GrantId, GrantTarget, Policy, Quota, Service, TemporaryGrant,
-    Usage, evaluate_access,
+    AccessStatus, FilterPolicy, GrantId, GrantTarget, HolidayPeriod, Policy, Quota, Rules, Service,
+    TemporaryGrant, Usage, evaluate_access,
 };
 use serde::Serialize;
 use sqlx::SqlitePool;
@@ -107,9 +107,14 @@ pub async fn forget_service(db: &SqlitePool, id: &str) -> Result<()> {
                 .await?;
         for (row_id, policy) in rows {
             let Ok(mut policy) = serde_json::from_str::<Policy>(&policy) else { continue };
-            let blocked = policy.filter.blocked_services.remove(id);
-            let requestable = policy.filter.requestable_services.remove(id);
-            if blocked || requestable {
+            let mut changed = false;
+            let filters = std::iter::once(&mut policy.filter)
+                .chain(policy.holidays.as_mut().map(|h| &mut h.filter));
+            for filter in filters {
+                changed |= filter.blocked_services.remove(id);
+                changed |= filter.requestable_services.remove(id);
+            }
+            if changed {
                 sqlx::query(&format!("UPDATE {table} SET policy = ? WHERE id = ?"))
                     .bind(serde_json::to_string(&policy)?)
                     .bind(row_id)
@@ -230,10 +235,15 @@ pub fn usage_from_seconds((today, week): (i64, i64)) -> Usage {
     Usage { today_minutes: (today / 60) as u32, week_minutes: (week / 60) as u32 }
 }
 
+/// Les règles d'une politique aujourd'hui, dans le fuseau du serveur.
+pub fn rules_today<'a>(policy: &'a Policy, holidays: &'a [HolidayPeriod]) -> Rules<'a> {
+    policy.rules_on(util::today(), holidays)
+}
+
 /// État d'accès à l'instant présent, dans le fuseau du serveur.
-pub fn access_now(policy: &Policy, grants: &[TemporaryGrant], usage: Usage) -> AccessStatus {
+pub fn access_now(rules: Rules<'_>, grants: &[TemporaryGrant], usage: Usage) -> AccessStatus {
     let now = Local::now();
-    evaluate_access(policy, grants, now.to_utc(), now.weekday(), now.time(), usage)
+    evaluate_access(rules, grants, now.to_utc(), now.weekday(), now.time(), usage)
 }
 
 fn hm(h: u32, m: u32) -> NaiveTime {
@@ -283,6 +293,7 @@ pub fn default_policy(birth_year: Option<i64>) -> Policy {
             sunday: free_day(),
         },
         quota: Quota { daily_minutes: Some(if young { 60 } else { 90 }), weekly_minutes: None },
+        holidays: None,
     }
 }
 
@@ -295,9 +306,13 @@ pub fn strictest_policy(children: &[Child]) -> Policy {
         ..Default::default()
     };
     for child in children {
-        filter.blocked_categories.extend(child.policy.filter.blocked_categories.iter().cloned());
-        filter.blocked_services.extend(child.policy.filter.blocked_services.iter().cloned());
-        filter.deny.extend(child.policy.filter.deny.iter().cloned());
+        let rules = std::iter::once(&child.policy.filter)
+            .chain(child.policy.holidays.as_ref().map(|h| &h.filter));
+        for other in rules {
+            filter.blocked_categories.extend(other.blocked_categories.iter().cloned());
+            filter.blocked_services.extend(other.blocked_services.iter().cloned());
+            filter.deny.extend(other.deny.iter().cloned());
+        }
     }
-    Policy { filter, schedule: WeeklySchedule::always(), quota: Quota::default() }
+    Policy { filter, schedule: WeeklySchedule::always(), quota: Quota::default(), holidays: None }
 }

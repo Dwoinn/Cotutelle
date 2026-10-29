@@ -57,6 +57,7 @@ pub fn router() -> Router<Shared> {
         .route("/services/{id}/logo", get(services::logo))
         .route("/settings", get(settings::get).put(settings::update))
         .route("/blocklists/refresh", post(settings::refresh_blocklists))
+        .route("/holidays", get(settings::holidays).put(settings::update_holidays))
         // Espace enfant
         .route("/child/enter", get(child::enter))
         .route("/child/me", get(child::me))

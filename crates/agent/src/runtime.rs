@@ -7,7 +7,8 @@ use chrono::{DateTime, Datelike, Local, NaiveDate};
 use cotutelle_common::protocol::{AccountState, AgentMessage, DeviceState};
 use cotutelle_common::stats::DnsStats;
 use cotutelle_common::{
-    AccessStatus, Blocklists, FilterContext, Usage, Verdict, evaluate, evaluate_access,
+    AccessStatus, Blocklists, FilterContext, HolidayPeriod, Usage, Verdict, evaluate,
+    evaluate_access,
 };
 use cotutelle_dns::{Decision, Handler};
 use std::net::{IpAddr, SocketAddr};
@@ -56,6 +57,16 @@ impl Runtime {
             .unwrap_or_default()
     }
 
+    /// Périodes de vacances scolaires reçues avec l'état.
+    pub fn holidays(&self) -> Vec<HolidayPeriod> {
+        self.state
+            .read()
+            .expect("verrou état")
+            .as_ref()
+            .map(|s| s.holidays.clone())
+            .unwrap_or_default()
+    }
+
     pub fn foreground(&self) -> Option<String> {
         self.foreground.read().expect("verrou premier plan").clone()
     }
@@ -92,11 +103,17 @@ impl Runtime {
         }
     }
 
-    /// État d'accès d'un compte géré à l'instant `now`.
-    pub fn access(&self, account: &AccountState, now: DateTime<Local>) -> AccessStatus {
+    /// État d'accès d'un compte géré à l'instant `now`, selon les règles du
+    /// jour (période scolaire ou vacances).
+    pub fn access(
+        &self,
+        account: &AccountState,
+        holidays: &[HolidayPeriod],
+        now: DateTime<Local>,
+    ) -> AccessStatus {
         let usage = self.total_usage(account, now.date_naive());
         evaluate_access(
-            &account.policy,
+            account.policy.rules_on(now.date_naive(), holidays),
             &account.grants,
             now.to_utc(),
             now.weekday(),
@@ -127,11 +144,13 @@ impl Handler for Runtime {
             return Decision::Forward;
         };
 
+        let now = chrono::Local::now();
+        let rules = account.policy.rules_on(now.date_naive(), &state.holidays);
         let blocklists = self.blocklists.read().expect("verrou listes");
         let verdict = evaluate(
             name,
             &FilterContext {
-                policy: &account.policy.filter,
+                policy: rules.filter,
                 grants: &account.grants,
                 blocklists: &blocklists,
                 services: &state.services,
@@ -139,7 +158,7 @@ impl Handler for Runtime {
                 // Accès fermé : la session est verrouillée (D4) et, en seconde
                 // barrière si le verrou ne tient pas, le DNS est coupé. Le
                 // serveur reste joignable pour apprendre la réouverture.
-                access_open: self.access(account, chrono::Local::now()).open
+                access_open: self.access(account, &state.holidays, now).open
                     || cotutelle_common::normalize_domain(name)
                         == server_host(&self.identity.server),
             },

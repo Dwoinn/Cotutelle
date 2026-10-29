@@ -3,10 +3,11 @@
 use crate::auth::Parent;
 use crate::error::{ApiError, ApiResult};
 use crate::state::Shared;
-use crate::{lan, notify, tasks};
+use crate::{holidays, lan, notify, tasks};
 use axum::Json;
 use axum::extract::State;
-use cotutelle_common::catalog;
+use chrono::NaiveDate;
+use cotutelle_common::{HolidayPeriod, catalog};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -111,4 +112,64 @@ pub async fn refresh_blocklists(_: Parent, State(state): State<Shared>) -> ApiRe
     }
     tokio::spawn(async move { tasks::refresh_blocklists(&state).await });
     Ok(Json(json!({ "started": true })))
+}
+
+async fn holidays_json(state: &Shared, warning: Option<String>) -> Value {
+    let settings = holidays::settings(state).await;
+    let calendar = holidays::calendar_for(state, &settings).await;
+    json!({
+        "zone": settings.zone,
+        "zones": holidays::ZONES,
+        "fetched_at": (calendar.fetched_at > 0).then_some(calendar.fetched_at),
+        "calendar": calendar.periods,
+        "removed": settings.removed,
+        "added": settings.added,
+        "periods": holidays::effective(&settings, &calendar),
+        "warning": warning,
+    })
+}
+
+/// Vacances scolaires : zone, calendrier officiel, ajustements et périodes effectives.
+pub async fn holidays(_: Parent, State(state): State<Shared>) -> ApiResult<Value> {
+    Ok(Json(holidays_json(&state, None).await))
+}
+
+#[derive(Deserialize)]
+pub struct HolidaysInput {
+    zone: String,
+    #[serde(default)]
+    removed: Vec<NaiveDate>,
+    #[serde(default)]
+    added: Vec<HolidayPeriod>,
+}
+
+pub async fn update_holidays(
+    _: Parent,
+    State(state): State<Shared>,
+    Json(body): Json<HolidaysInput>,
+) -> ApiResult<Value> {
+    let zone = body.zone.trim().to_string();
+    if !zone.is_empty() && !holidays::ZONES.contains(&zone.as_str()) {
+        return Err(ApiError::bad_request("zone inconnue"));
+    }
+    let mut added = Vec::new();
+    for period in body.added {
+        let label = super::clean_name(&period.label, "nom de la période")?;
+        if period.end < period.start {
+            return Err(ApiError::bad_request(format!("{label} : la fin précède le début")));
+        }
+        added.push(HolidayPeriod { label, ..period });
+    }
+    let settings =
+        holidays::HolidaySettings { zone, removed: body.removed.into_iter().collect(), added };
+    holidays::save_settings(&state, &settings).await?;
+    // Une zone nouvellement choisie montre ses périodes sans attendre.
+    let warning = match holidays::refresh(&state, false).await {
+        Ok(_) => None,
+        Err(e) => Some(format!(
+            "Calendrier officiel indisponible pour le moment ({e:#}). Nouvel essai chaque heure."
+        )),
+    };
+    state.changed().await;
+    Ok(Json(holidays_json(&state, warning).await))
 }

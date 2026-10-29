@@ -8,7 +8,7 @@ use crate::util;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use chrono::Duration;
-use cotutelle_common::{Policy, clean_domain};
+use cotutelle_common::{FilterPolicy, Policy, clean_domain};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -36,12 +36,18 @@ fn check_birth_year(year: Option<i64>) -> Result<(), ApiError> {
 /// Nettoie une politique reçue de l'interface : listes personnelles en forme
 /// canonique et sans vides, services proposés pris parmi les services bloqués.
 pub fn sanitize(mut policy: Policy) -> Policy {
-    let filter = &mut policy.filter;
+    sanitize_filter(&mut policy.filter);
+    if let Some(holidays) = &mut policy.holidays {
+        sanitize_filter(&mut holidays.filter);
+    }
+    policy
+}
+
+fn sanitize_filter(filter: &mut FilterPolicy) {
     for list in [&mut filter.allow, &mut filter.deny] {
         *list = list.iter().filter_map(|d| clean_domain(d)).collect();
     }
     filter.requestable_services.retain(|s| filter.blocked_services.contains(s));
-    policy
 }
 
 pub async fn list(_: Parent, State(state): State<Shared>) -> ApiResult<Vec<Child>> {

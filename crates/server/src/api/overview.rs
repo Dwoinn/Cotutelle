@@ -4,12 +4,12 @@ use super::devices::list_devices;
 use super::grants::pending_requests;
 use crate::auth::Parent;
 use crate::error::{ApiError, ApiResult};
-use crate::model;
 use crate::state::Shared;
-use crate::util;
+use crate::{holidays, model, util};
 use axum::Json;
 use axum::extract::{Path, State};
 use chrono::{Datelike, Local};
+use cotutelle_common::HolidayPeriod;
 use serde_json::{Value, json};
 
 async fn open_alerts(state: &Shared) -> Result<Vec<Value>, ApiError> {
@@ -34,6 +34,7 @@ struct Snapshot<'a> {
     grants: &'a [model::Grant],
     devices: &'a [Value],
     blocked: &'a [(String, String, i64)],
+    holidays: &'a [HolidayPeriod],
     now: chrono::DateTime<Local>,
 }
 
@@ -42,12 +43,12 @@ async fn child_summary(
     child: &model::Child,
     snapshot: &Snapshot<'_>,
 ) -> Result<Value, ApiError> {
-    let Snapshot { grants, devices, blocked, now } = *snapshot;
+    let Snapshot { grants, devices, blocked, holidays, now } = *snapshot;
     let seconds = model::usage_seconds(&state.db, &child.id, None).await?;
     let child_grants = model::grants_of_child(grants, &child.id);
-    let status =
-        model::access_now(&child.policy, &child_grants, model::usage_from_seconds(seconds));
-    let next = child.policy.schedule.next_opening(now.weekday(), now.time());
+    let rules = child.policy.rules_on(now.date_naive(), holidays);
+    let status = model::access_now(rules, &child_grants, model::usage_from_seconds(seconds));
+    let next = rules.schedule.next_opening(now.weekday(), now.time());
 
     // Appareils de l'enfant : comptes rattachés ou appareil réseau attribué.
     let mine: Vec<Value> = devices
@@ -78,12 +79,14 @@ async fn child_summary(
         "status": status,
         "used_today_seconds": seconds.0,
         "used_week_seconds": seconds.1,
-        "today_ranges": child.policy.schedule.ranges_for(now.weekday()),
+        "today_ranges": rules.schedule.ranges_for(now.weekday()),
+        // La période de vacances dont les règles s'appliquent aujourd'hui.
+        "holiday": rules.holiday.map(|h| json!({ "label": h.label, "end": h.end })),
         "blocked_today": blocked.iter().filter(|(c, _, _)| *c == child.id).map(|(_, _, n)| n).sum::<i64>(),
         "next_opening": next.map(|(day, time)| json!({ "day": day.to_string(), "time": time.format("%H:%M").to_string() })),
         "grants": grants.iter().filter(|g| g.child_id.as_deref() == Some(child.id.as_str())).collect::<Vec<_>>(),
-        "blocked_services": child.policy.filter.blocked_services,
-        "requestable_services": child.policy.filter.requestable_services,
+        "blocked_services": rules.filter.blocked_services,
+        "requestable_services": rules.filter.requestable_services,
         "devices": mine,
     }))
 }
@@ -98,8 +101,14 @@ pub async fn summary(
     let grants = model::live_grants(&state.db).await?;
     let devices = list_devices(&state).await?;
     let blocked = model::blocked_today(&state.db).await?;
-    let snapshot =
-        Snapshot { grants: &grants, devices: &devices, blocked: &blocked, now: Local::now() };
+    let holidays = holidays::periods(&state).await;
+    let snapshot = Snapshot {
+        grants: &grants,
+        devices: &devices,
+        blocked: &blocked,
+        holidays: &holidays,
+        now: Local::now(),
+    };
     Ok(Json(
         json!({ "child": child_summary(&state, &child, &snapshot).await?, "now": util::now() }),
     ))
@@ -109,8 +118,14 @@ pub async fn dashboard(_: Parent, State(state): State<Shared>) -> ApiResult<Valu
     let grants = model::live_grants(&state.db).await?;
     let devices = list_devices(&state).await?;
     let blocked = model::blocked_today(&state.db).await?;
-    let snapshot =
-        Snapshot { grants: &grants, devices: &devices, blocked: &blocked, now: Local::now() };
+    let holidays = holidays::periods(&state).await;
+    let snapshot = Snapshot {
+        grants: &grants,
+        devices: &devices,
+        blocked: &blocked,
+        holidays: &holidays,
+        now: Local::now(),
+    };
 
     let mut children = Vec::new();
     for child in model::children(&state.db).await? {

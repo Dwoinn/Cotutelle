@@ -7,7 +7,7 @@ use super::grants::{REQUEST_COLUMNS, check_target, request_json, request_sentenc
 use crate::auth::{self, ChildSession, Parent};
 use crate::error::{ApiError, ApiResult};
 use crate::state::Shared;
-use crate::{logos, model, notify, util};
+use crate::{holidays, logos, model, notify, util};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -26,10 +26,11 @@ async fn space(state: &Shared, child_id: &str) -> Result<Value, ApiError> {
     let grants = model::live_grants(&state.db).await?;
     let seconds = model::usage_seconds(&state.db, child_id, None).await?;
     let child_grants = model::grants_of_child(&grants, child_id);
-    let status =
-        model::access_now(&child.policy, &child_grants, model::usage_from_seconds(seconds));
+    let holidays = holidays::periods(state).await;
     let now = Local::now();
-    let next = child.policy.schedule.next_opening(now.weekday(), now.time());
+    let rules = child.policy.rules_on(now.date_naive(), &holidays);
+    let status = model::access_now(rules, &child_grants, model::usage_from_seconds(seconds));
+    let next = rules.schedule.next_opening(now.weekday(), now.time());
 
     let requests: Vec<_> = sqlx::query_as(&format!(
         "SELECT {REQUEST_COLUMNS} FROM requests r JOIN children c ON c.id = r.child_id
@@ -42,7 +43,7 @@ async fn space(state: &Shared, child_id: &str) -> Result<Value, ApiError> {
 
     // L'enfant ne reçoit que les services qui le concernent : ceux que ses
     // parents lui proposent, et ceux qu'ils lui ont ouverts.
-    let filter = &child.policy.filter;
+    let filter = rules.filter;
     let requestable =
         |id: &str| filter.blocked_services.contains(id) && filter.requestable_services.contains(id);
     let granted = |id: &str| {
@@ -73,11 +74,12 @@ async fn space(state: &Shared, child_id: &str) -> Result<Value, ApiError> {
         "status": status,
         "used_today_seconds": seconds.0,
         "next_opening": next.map(|(day, time)| json!({ "day": day.to_string(), "time": time.format("%H:%M").to_string() })),
-        "today_ranges": child.policy.schedule.ranges_for(now.weekday()),
+        "today_ranges": rules.schedule.ranges_for(now.weekday()),
+        "holiday": rules.holiday.map(|h| json!({ "label": h.label, "end": h.end })),
         "grants": grants.iter().filter(|g| g.child_id.as_deref() == Some(child_id)).collect::<Vec<_>>(),
         "services": services,
         "requestable_services": requestable_services,
-        "allow_requests": child.policy.filter.allow_requests,
+        "allow_requests": filter.allow_requests,
         "requests": requests.into_iter().map(|row| request_json(&catalog, row)).collect::<Vec<_>>(),
         "activity": activity,
         "blocked_today": blocked_today,
@@ -139,7 +141,8 @@ pub async fn request(
     let child = model::child(&state.db, &session.child_id)
         .await?
         .ok_or_else(|| ApiError::not_found("enfant"))?;
-    if !child.policy.filter.allow_requests {
+    let holidays = holidays::periods(&state).await;
+    if !model::rules_today(&child.policy, &holidays).filter.allow_requests {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "les demandes ne sont pas activées"));
     }
     // Un enfant peut demander un service, un site ou du temps : rien d'autre.

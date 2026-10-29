@@ -1,7 +1,7 @@
 //! Hub des agents : connexions WebSocket, construction et diffusion de l'état.
 
 use crate::state::Shared;
-use crate::{lan, model, notify, util};
+use crate::{holidays, lan, model, notify, util};
 use anyhow::{Context, Result};
 use axum::extract::ws::{Message, WebSocket};
 use chrono::Utc;
@@ -100,7 +100,7 @@ pub async fn device_state(state: &Shared, device_id: &str) -> Result<DeviceState
     for (os_account, child_id) in accounts {
         let Some(child) = model::child(&state.db, &child_id).await? else { continue };
         let elsewhere = model::usage_seconds(&state.db, &child_id, Some(device_id)).await?;
-        categories.extend(child.policy.filter.blocked_categories.iter().cloned());
+        categories.extend(child.policy.blocked_categories());
         out.push(AccountState {
             os_account,
             child: ChildId(child_id.parse().context("identifiant d'enfant")?),
@@ -118,6 +118,7 @@ pub async fn device_state(state: &Shared, device_id: &str) -> Result<DeviceState
         blocklists: state.blocklists.refs_for(&categories),
         services: model::services(&state.db).await?,
         upstream_dns: lan::upstreams_setting(state).await.iter().map(ToString::to_string).collect(),
+        holidays: holidays::periods(state).await,
     })
 }
 

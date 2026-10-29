@@ -1,7 +1,7 @@
 //! Tâches de fond : statistiques, purge, mise à jour des listes, veille.
 
 use crate::state::Shared;
-use crate::{lan, logos, model, notify, util};
+use crate::{holidays, lan, logos, model, notify, util};
 use anyhow::Result;
 use std::time::Duration;
 
@@ -32,6 +32,11 @@ pub fn spawn(state: Shared) {
             // Dès le démarrage, puis pour retenter les recherches infructueuses.
             if let Err(e) = fetch_logos(&s).await {
                 tracing::error!(error = ?e, "récupération des logos des services");
+            }
+            match holidays::refresh(&s, false).await {
+                Ok(true) => s.changed().await,
+                Ok(false) => {}
+                Err(e) => tracing::warn!(error = ?e, "mise à jour du calendrier scolaire"),
             }
         }
     });

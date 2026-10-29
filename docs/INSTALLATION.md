@@ -183,7 +183,22 @@ Dans **Réglages › Notifications**, collez l'adresse d'un sujet
 abonnez-vous à ce sujet dans l'application ntfy. Le nom du sujet tient lieu de
 mot de passe : choisissez-le long et aléatoire. ntfy peut aussi s'auto-héberger.
 
-## 5. Accès hors de la maison
+## 5. Vacances scolaires
+
+Dans **Réglages › Vacances scolaires**, choisissez votre zone (A, B, C, Corse
+ou outre-mer) : le serveur télécharge le calendrier officiel de l'Éducation
+nationale, le garde en base et le vérifie chaque semaine. Vous pouvez écarter
+une période ou en ajouter une : un pont, un voyage, une semaine de stage.
+
+Ces périodes ne changent rien tant qu'un enfant n'a pas de règles de
+vacances. Pour lui en donner, ouvrez ses **Paramètres**, onglet **Temps**,
+et activez « Règles différentes pendant les vacances scolaires » : ses
+horaires, ses quotas et son filtre de vacances partent de ceux de la période
+scolaire, à ajuster dans les onglets Temps et Filtre. Les agents reçoivent
+les périodes avec la politique et changent de règles au premier jour, même
+sans serveur.
+
+## 6. Accès hors de la maison
 
 N'ouvrez pas le port 8080 sur Internet. Utilisez un VPN personnel comme
 Tailscale ou WireGuard pour joindre le serveur depuis l'extérieur. Le portable

@@ -67,6 +67,14 @@ export function ago(ts: number | null, now = Date.now() / 1000): string {
 	return `le ${new Date(ts * 1000).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}`;
 }
 
+/** Date parlée : « 1er novembre », « 3 janvier 2027 » si l'année diffère. */
+export function longDate(iso: string, today = new Date()): string {
+	const date = new Date(`${iso}T12:00:00`);
+	const sameYear = date.getFullYear() === today.getFullYear();
+	const text = date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: sameYear ? undefined : 'numeric' });
+	return text.replace(/^1 /, '1er ');
+}
+
 /** Temps restant avant une échéance : « 12 min », « 1 h 30 ». */
 export function until(ts: number, now = Date.now() / 1000): string {
 	return minutes(Math.max(0, (ts - now) / 60));

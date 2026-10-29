@@ -11,7 +11,7 @@
 	import Sheet from '#lib/components/Sheet.svelte';
 	import Shield from '#lib/components/Shield.svelte';
 	import WeekChart from '#lib/components/WeekChart.svelte';
-	import { filterGrants, grantRemaining, minutes, nowMinutes, opening, seconds, targetLabel, timeLine } from '#lib/format.ts';
+	import { filterGrants, grantRemaining, longDate, minutes, nowMinutes, opening, seconds, targetLabel, timeLine } from '#lib/format.ts';
 	import { cleanSite } from '#lib/services.ts';
 	import type { ChildSpace, GrantTarget } from '#lib/types.ts';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
@@ -159,6 +159,9 @@
 						Tu as utilisé {seconds(space.used_today_seconds)} sur {minutes(status.quota_today_minutes)} aujourd'hui.
 					{:else}
 						Tu as utilisé {seconds(space.used_today_seconds)} aujourd'hui.
+					{/if}
+					{#if space.holiday}
+						<span class="block">Vacances jusqu'au {longDate(space.holiday.end)}.</span>
 					{/if}
 				</p>
 			</section>

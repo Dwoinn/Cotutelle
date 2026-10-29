@@ -10,7 +10,7 @@
 	import Sheet from '#lib/components/Sheet.svelte';
 	import Shield from '#lib/components/Shield.svelte';
 	import TimeSheet from '#lib/components/TimeSheet.svelte';
-	import { ago, filterGrants, grantRemaining, minutes, nowMinutes, targetLabel, timeGrants, timeLine } from '#lib/format.ts';
+	import { ago, filterGrants, grantRemaining, longDate, minutes, nowMinutes, targetLabel, timeGrants, timeLine } from '#lib/format.ts';
 	import type { Child, ChildRequest, ChildSummary, Dashboard, Device, Grant, Service } from '#lib/types.ts';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Moon from '@lucide/svelte/icons/moon';
@@ -204,7 +204,10 @@
 							<a href="/enfants/{child.id}" class="-m-1 flex items-center gap-3 rounded-2xl p-1">
 								<Avatar name={child.name} color={child.color} />
 								<span class="min-w-0 flex-1">
-									<span class="display block truncate text-[1.45rem]">{child.name}</span>
+									<span class="display block truncate text-[1.45rem]">
+										{child.name}
+										{#if child.holiday}<span class="tag-quiet ml-1 align-middle" title="Règles de vacances jusqu'au {longDate(child.holiday.end)}">Vacances</span>{/if}
+									</span>
 									<span class="block truncate text-sm {place.warn ? 'text-ember font-semibold' : 'muted'}">{place.text}</span>
 								</span>
 								<ChevronRight size={22} class="text-muted shrink-0" />

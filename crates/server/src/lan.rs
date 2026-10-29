@@ -1,12 +1,13 @@
 //! DNS du réseau local (D5) : filtre les appareils sans agent selon leur
 //! adresse IP. Un appareil inconnu n'est ni filtré ni journalisé.
 
-use crate::model;
 use crate::state::Shared;
-use crate::util;
+use crate::{holidays, model, util};
 use anyhow::Result;
 use cotutelle_common::stats::DnsStats;
-use cotutelle_common::{FilterContext, Policy, Service, TemporaryGrant, Usage, Verdict, evaluate};
+use cotutelle_common::{
+    FilterContext, HolidayPeriod, Policy, Service, TemporaryGrant, Usage, Verdict, evaluate,
+};
 use cotutelle_dns::{Decision, Handler};
 use std::collections::{BTreeSet, HashMap};
 use std::net::{IpAddr, SocketAddr};
@@ -30,6 +31,8 @@ pub struct LanFilter {
     profiles: RwLock<HashMap<IpAddr, Profile>>,
     /// Catalogue des services de la famille.
     services: RwLock<Vec<Service>>,
+    /// Périodes de vacances scolaires effectives.
+    holidays: RwLock<Vec<HolidayPeriod>>,
     upstreams: RwLock<Vec<SocketAddr>>,
     blocklists: Arc<BlocklistStore>,
     /// Compteurs par (appareil, enfant), vidés chaque minute vers la base.
@@ -41,6 +44,7 @@ impl LanFilter {
         Self {
             profiles: RwLock::default(),
             services: RwLock::default(),
+            holidays: RwLock::default(),
             upstreams: RwLock::new(parse_upstreams(DEFAULT_UPSTREAMS)),
             blocklists,
             stats: Mutex::default(),
@@ -75,13 +79,15 @@ impl Handler for LanFilter {
         let Some(profile) = profiles.get(&canonical(client)) else {
             return Decision::Forward;
         };
-        let access = model::access_now(&profile.policy, &profile.grants, profile.usage);
+        let holidays = self.holidays.read().expect("verrou vacances");
+        let rules = model::rules_today(&profile.policy, &holidays);
+        let access = model::access_now(rules, &profile.grants, profile.usage);
         let services = self.services.read().expect("verrou services");
         let verdict = self.blocklists.with_loaded(|blocklists| {
             evaluate(
                 name,
                 &FilterContext {
-                    policy: &profile.policy.filter,
+                    policy: rules.filter,
                     grants: &profile.grants,
                     blocklists,
                     services: &services,
@@ -135,7 +141,7 @@ pub async fn rebuild(state: &Shared) -> Result<()> {
                 Usage::default(),
             ),
         };
-        categories.extend(policy.filter.blocked_categories.iter().cloned());
+        categories.extend(policy.blocked_categories());
         profiles.insert(
             canonical(ip),
             Profile {
@@ -154,7 +160,9 @@ pub async fn rebuild(state: &Shared) -> Result<()> {
 
     let services = model::services(&state.db).await?;
     let upstreams = upstreams_setting(state).await;
+    let holidays = holidays::periods(state).await;
     *state.lan.services.write().expect("verrou services") = services;
+    *state.lan.holidays.write().expect("verrou vacances") = holidays;
     *state.lan.upstreams.write().expect("verrou amonts") = upstreams;
     *state.lan.profiles.write().expect("verrou profils") = profiles;
     Ok(())

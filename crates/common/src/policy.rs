@@ -1,7 +1,8 @@
 //! Politique appliquée à un couple appareil + compte de session.
 
+use crate::holidays::{HolidayPeriod, holiday_on};
 use crate::schedule::WeeklySchedule;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -35,12 +36,69 @@ pub struct Quota {
     pub weekly_minutes: Option<u32>,
 }
 
+/// Règles propres aux vacances scolaires. Absentes, celles de la période
+/// scolaire valent toute l'année.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct HolidayPolicy {
+    pub filter: FilterPolicy,
+    pub schedule: WeeklySchedule,
+    pub quota: Quota,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Policy {
     pub filter: FilterPolicy,
     pub schedule: WeeklySchedule,
     pub quota: Quota,
+    pub holidays: Option<HolidayPolicy>,
+}
+
+/// Les règles en vigueur un jour donné : celles de la période scolaire ou
+/// celles des vacances.
+#[derive(Debug, Clone, Copy)]
+pub struct Rules<'a> {
+    pub filter: &'a FilterPolicy,
+    pub schedule: &'a WeeklySchedule,
+    pub quota: Quota,
+    /// La période de vacances dont les règles s'appliquent, s'il y en a une.
+    pub holiday: Option<&'a HolidayPeriod>,
+}
+
+impl Policy {
+    /// Les règles de la période scolaire.
+    pub fn school_rules(&self) -> Rules<'_> {
+        Rules { filter: &self.filter, schedule: &self.schedule, quota: self.quota, holiday: None }
+    }
+
+    /// Les règles en vigueur à une date locale : celles des vacances si la
+    /// date tombe dans une période et que la politique en a.
+    ///
+    /// Le quota hebdomadaire garde sa semaine du lundi au dimanche ; seul
+    /// son plafond change selon le jour courant. C'est un choix simple, sans
+    /// proratisation d'une semaine à cheval sur la rentrée.
+    pub fn rules_on<'a>(&'a self, date: NaiveDate, periods: &'a [HolidayPeriod]) -> Rules<'a> {
+        match (&self.holidays, holiday_on(periods, date)) {
+            (Some(rules), Some(holiday)) => Rules {
+                filter: &rules.filter,
+                schedule: &rules.schedule,
+                quota: rules.quota,
+                holiday: Some(holiday),
+            },
+            _ => self.school_rules(),
+        }
+    }
+
+    /// Les catégories bloquées à un moment ou un autre de l'année : les
+    /// listes qu'un appareil doit détenir.
+    pub fn blocked_categories(&self) -> BTreeSet<String> {
+        let mut all = self.filter.blocked_categories.clone();
+        if let Some(rules) = &self.holidays {
+            all.extend(rules.filter.blocked_categories.iter().cloned());
+        }
+        all
+    }
 }
 
 /// Ce qu'une exception temporaire autorise.

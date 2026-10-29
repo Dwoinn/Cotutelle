@@ -1,14 +1,16 @@
 <script lang="ts">
 	import { api } from '#lib/api.ts';
-	import { app, attempt, resetCatalog } from '#lib/app.svelte.ts';
+	import { app, attempt, resetCatalog, toast } from '#lib/app.svelte.ts';
 	import About from '#lib/components/About.svelte';
-	import { ago } from '#lib/format.ts';
-	import type { Settings } from '#lib/types.ts';
+	import { ago, longDate } from '#lib/format.ts';
+	import type { HolidayPeriod, HolidaySettings, Settings } from '#lib/types.ts';
 	import { onMount } from 'svelte';
 
 	type ParentRow = { id: string; name: string; created_at: number };
 
 	let settings = $state<Settings | null>(null);
+	let holidays = $state<HolidaySettings | null>(null);
+	let newPeriod = $state<HolidayPeriod>({ label: '', start: '', end: '' });
 	let parents = $state<ParentRow[]>([]);
 	let newParent = $state({ name: '', password: '' });
 	let passwords = $state({ current: '', new: '' });
@@ -19,7 +21,43 @@
 
 	async function load() {
 		settings = (await attempt(() => api.get<Settings>('/settings'))) ?? settings;
+		holidays = (await attempt(() => api.get<HolidaySettings>('/holidays'))) ?? holidays;
 		parents = (await attempt(() => api.get<ParentRow[]>('/parents'))) ?? parents;
+	}
+
+	const today = new Date().toISOString().slice(0, 10);
+	// Les périodes passées ne regardent plus personne.
+	const upcoming = $derived(holidays?.calendar.filter((p) => p.end >= today) ?? []);
+
+	async function saveHolidays(message: string) {
+		if (!holidays) return;
+		const { zone, removed, added } = $state.snapshot(holidays);
+		const fresh = await attempt(() => api.put<HolidaySettings>('/holidays', { zone, removed, added }), message);
+		if (fresh) {
+			holidays = fresh;
+			if (fresh.warning) toast(fresh.warning, 'error');
+		}
+	}
+
+	function toggleRemoved(start: string) {
+		if (!holidays) return;
+		const kept = holidays.removed.includes(start);
+		holidays.removed = kept ? holidays.removed.filter((s) => s !== start) : [...holidays.removed, start];
+		saveHolidays(kept ? 'Période rétablie' : 'Période retirée');
+	}
+
+	function addPeriod(event: SubmitEvent) {
+		event.preventDefault();
+		if (!holidays) return;
+		holidays.added = [...holidays.added, $state.snapshot(newPeriod)];
+		newPeriod = { label: '', start: '', end: '' };
+		saveHolidays('Période ajoutée');
+	}
+
+	function removeAdded(index: number) {
+		if (!holidays) return;
+		holidays.added = holidays.added.filter((_, i) => i !== index);
+		saveHolidays('Période retirée');
 	}
 
 	onMount(load);
@@ -132,6 +170,77 @@
 					</div>
 				</div>
 				<button class="btn-primary">Enregistrer</button>
+			</form>
+		</section>
+	{/if}
+
+	{#if holidays}
+		<section class="panel">
+			<h2>Vacances scolaires</h2>
+			<p class="muted mt-1 mb-4 text-[0.95rem]">
+				Pour les enfants qui ont des règles de vacances. Le calendrier officiel de l'Éducation nationale est
+				téléchargé pour votre zone ; vous pouvez écarter une période ou en ajouter une : pont, voyage, stage.
+			</p>
+			<label class="label" for="zone">Zone</label>
+			<select id="zone" class="field" bind:value={holidays.zone} onchange={() => saveHolidays('Zone enregistrée')}>
+				<option value="">Sans calendrier officiel</option>
+				{#each holidays.zones as zone (zone)}
+					<option value={zone}>{zone}</option>
+				{/each}
+			</select>
+			{#if holidays.zone}
+				<p class="hint">
+					{#if holidays.fetched_at}Calendrier mis à jour {ago(holidays.fetched_at)}, vérifié chaque semaine.{:else}Calendrier pas encore téléchargé.{/if}
+				</p>
+			{/if}
+
+			{#if upcoming.length > 0 || holidays.added.length > 0}
+				<div class="rows mt-3">
+					{#each upcoming as period (period.start)}
+						{@const removed = holidays.removed.includes(period.start)}
+						<div class="row justify-between gap-3">
+							<span class="min-w-0 {removed ? 'opacity-50' : ''}">
+								<span class="block font-semibold {removed ? 'line-through' : ''}">{period.label}</span>
+								<span class="muted block text-sm">
+									{#if period.start === period.end}le {longDate(period.start)}{:else}du {longDate(period.start)} au {longDate(period.end)}{/if}
+								</span>
+							</span>
+							<button class="btn-ghost btn-sm text-muted shrink-0" onclick={() => toggleRemoved(period.start)}>
+								{removed ? 'Rétablir' : 'Retirer'}
+							</button>
+						</div>
+					{/each}
+					{#each holidays.added as period, index (`${period.start}-${index}`)}
+						<div class="row justify-between gap-3">
+							<span class="min-w-0">
+								<span class="block font-semibold">{period.label} <span class="tag-quiet ml-1">ajoutée</span></span>
+								<span class="muted block text-sm">
+									{#if period.start === period.end}le {longDate(period.start)}{:else}du {longDate(period.start)} au {longDate(period.end)}{/if}
+								</span>
+							</span>
+							<button class="btn-ghost btn-sm text-muted shrink-0" onclick={() => removeAdded(index)}>Retirer</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
+			<form class="border-line mt-2 space-y-3 border-t pt-4" onsubmit={addPeriod}>
+				<h3>Ajouter une période</h3>
+				<div class="grid gap-3 sm:grid-cols-3">
+					<div>
+						<label class="label" for="period-label">Nom</label>
+						<input id="period-label" class="field" bind:value={newPeriod.label} placeholder="Pont du 11 novembre" maxlength="40" required />
+					</div>
+					<div>
+						<label class="label" for="period-start">Du</label>
+						<input id="period-start" type="date" class="field" bind:value={newPeriod.start} max={newPeriod.end || undefined} required />
+					</div>
+					<div>
+						<label class="label" for="period-end">Au</label>
+						<input id="period-end" type="date" class="field" bind:value={newPeriod.end} min={newPeriod.start || undefined} required />
+					</div>
+				</div>
+				<button class="btn-quiet">Ajouter</button>
 			</form>
 		</section>
 	{/if}

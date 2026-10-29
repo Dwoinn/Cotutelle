@@ -7,7 +7,7 @@
 	import Segmented from '#lib/components/Segmented.svelte';
 	import TimeActions from '#lib/components/TimeActions.svelte';
 	import WeekChart from '#lib/components/WeekChart.svelte';
-	import { filterGrants, nowMinutes, seconds, timeGrants, timeLine } from '#lib/format.ts';
+	import { filterGrants, longDate, nowMinutes, seconds, timeGrants, timeLine } from '#lib/format.ts';
 	import type { Activity, Catalog, Child, ChildSummary } from '#lib/types.ts';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Eye from '@lucide/svelte/icons/eye';
@@ -163,6 +163,9 @@
 		{:else if tab === 'temps'}
 			<section class="panel">
 				<h2 class="mb-4">Temps de {child.name}</h2>
+				{#if summary?.child.holiday}
+					<p class="tag-sun -mt-2 mb-4">Règles de vacances jusqu'au {longDate(summary.child.holiday.end)}</p>
+				{/if}
 				{#if summary}
 					<TimeActions
 						name={child.name}
@@ -178,6 +181,9 @@
 		{:else}
 			<section class="panel">
 				<h2 class="mb-4">Filtre de {child.name}</h2>
+				{#if summary?.child.holiday}
+					<p class="tag-sun -mt-2 mb-4">Règles de vacances jusqu'au {longDate(summary.child.holiday.end)}</p>
+				{/if}
 				{#if summary && catalog}
 					<FilterActions
 						name={child.name}

@@ -10,23 +10,31 @@
 	import Switch from '#lib/components/Switch.svelte';
 	import { minutes } from '#lib/format.ts';
 	import { scheduleValid } from '#lib/schedule.ts';
-	import type { Catalog, Child } from '#lib/types.ts';
+	import type { Catalog, Child, HolidayPolicy, Policy } from '#lib/types.ts';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 
 	// Paramètres d'un enfant : ce qui vaut tous les jours. Les mesures du
 	// moment (temps en plus, ouverture d'un service) sont sur sa fiche.
 	const COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ec4899', '#0ea5e9', '#8b5cf6', '#ef4444', '#14b8a6'];
 	type Tab = 'temps' | 'filtre' | 'profil';
+	type Period = 'school' | 'holidays';
 
 	const id = $derived(page.params.id);
 	let tab = $state<Tab>('temps');
+	// Période scolaire ou vacances : les onglets Temps et Filtre montrent les règles de l'une ou l'autre.
+	let period = $state<Period>('school');
 	let saved = $state<Child | null>(null);
 	let draft = $state<Child | null>(null);
 	let catalog = $state<Catalog | null>(null);
 	let confirmDelete = $state(false);
 
 	const dirty = $derived(saved !== null && draft !== null && JSON.stringify(saved) !== JSON.stringify(draft));
-	const valid = $derived(draft !== null && draft.name.trim().length > 0 && scheduleValid(draft.policy.schedule));
+	const valid = $derived(
+		draft !== null &&
+			draft.name.trim().length > 0 &&
+			scheduleValid(draft.policy.schedule) &&
+			(draft.policy.holidays === null || scheduleValid(draft.policy.holidays.schedule))
+	);
 	const thisYear = new Date().getFullYear();
 
 	async function load(childId: string) {
@@ -41,6 +49,19 @@
 		if (id) load(id);
 	});
 
+	/** Active ou retire les règles de vacances ; à l'activation, elles partent de celles de l'école. */
+	function setHolidays(on: boolean) {
+		if (!draft) return;
+		if (on) {
+			const { filter, schedule, quota } = $state.snapshot(draft.policy);
+			draft.policy.holidays = { filter, schedule, quota };
+			period = 'holidays';
+		} else {
+			draft.policy.holidays = null;
+			period = 'school';
+		}
+	}
+
 	async function save() {
 		if (!draft) return;
 		const child = await attempt(() => api.put<Child>(`/children/${draft!.id}`, $state.snapshot(draft)), 'Enregistré');
@@ -51,7 +72,10 @@
 	}
 
 	function cancel() {
-		if (saved) draft = structuredClone(saved);
+		if (saved) {
+			draft = structuredClone(saved);
+			if (!saved.policy.holidays) period = 'school';
+		}
 	}
 
 	async function remove() {
@@ -59,6 +83,76 @@
 		if (await attempt(() => api.del(`/children/${saved!.id}`), `${saved.name} supprimé`)) goto('/');
 	}
 </script>
+
+{#snippet periodPicker()}
+	{#if draft?.policy.holidays}
+		<Segmented
+			bind:value={period}
+			label="Période"
+			options={[
+				{ value: 'school', label: 'Période scolaire' },
+				{ value: 'holidays', label: 'Vacances' }
+			]}
+		/>
+	{/if}
+{/snippet}
+
+{#snippet timeRules(rules: Policy | HolidayPolicy)}
+	<section class="panel">
+		<h2 class="mb-1">{period === 'holidays' ? 'Temps d’écran en vacances' : 'Temps d’écran'}</h2>
+		<div class="rows">
+			<div>
+				<Switch
+					checked={rules.quota.daily_minutes !== null}
+					label="Limiter le temps par jour"
+					description="Partagé entre tous ses appareils."
+					onchange={(on) => (rules.quota.daily_minutes = on ? 90 : null)}
+				/>
+				{#if rules.quota.daily_minutes !== null}
+					<div class="pb-4">
+						<p class="display mb-2 text-4xl">{minutes(rules.quota.daily_minutes)}</p>
+						<input type="range" min="15" max="360" step="15" class="w-full accent-[var(--sun)]" aria-label="Minutes par jour" bind:value={rules.quota.daily_minutes} />
+					</div>
+				{/if}
+			</div>
+			<div>
+				<Switch
+					checked={rules.quota.weekly_minutes !== null}
+					label="Limiter aussi le temps par semaine"
+					description="Du lundi au dimanche."
+					onchange={(on) => (rules.quota.weekly_minutes = on ? 600 : null)}
+				/>
+				{#if rules.quota.weekly_minutes !== null}
+					<div class="pb-4">
+						<p class="display mb-2 text-4xl">{minutes(rules.quota.weekly_minutes)}</p>
+						<input type="range" min="60" max="2400" step="30" class="w-full accent-[var(--sun)]" aria-label="Minutes par semaine" bind:value={rules.quota.weekly_minutes} />
+					</div>
+				{/if}
+			</div>
+		</div>
+	</section>
+
+	<section class="panel">
+		<h2>{period === 'holidays' ? 'Horaires en vacances' : 'Horaires'}</h2>
+		<p class="muted mb-2 text-sm">En dehors de ces plages, la session se verrouille, après un rappel à 5 minutes puis à 1 minute.</p>
+		<ScheduleEditor bind:schedule={rules.schedule} />
+	</section>
+{/snippet}
+
+{#snippet filterRules(rules: Policy | HolidayPolicy)}
+	<section class="panel py-2">
+		<Switch
+			bind:checked={rules.filter.allow_requests}
+			label="{saved?.name} peut faire des demandes"
+			description="Depuis son espace : obtenir du temps, ouvrir un site ou l'un des services réglés « sur demande ». Vous répondez depuis l'accueil."
+		/>
+	</section>
+	<section class="panel">
+		{#if catalog}
+			<FilterEditor bind:filter={rules.filter} bind:catalog childName={saved?.name} />
+		{/if}
+	</section>
+{/snippet}
 
 {#if draft && saved}
 	<div class="mx-auto max-w-2xl space-y-5 pb-24">
@@ -82,58 +176,27 @@
 		/>
 
 		{#if tab === 'temps'}
-			<section class="panel">
-				<h2 class="mb-1">Temps d'écran</h2>
-				<div class="rows">
-					<div>
-						<Switch
-							checked={draft.policy.quota.daily_minutes !== null}
-							label="Limiter le temps par jour"
-							description="Partagé entre tous ses appareils."
-							onchange={(on) => (draft!.policy.quota.daily_minutes = on ? 90 : null)}
-						/>
-						{#if draft.policy.quota.daily_minutes !== null}
-							<div class="pb-4">
-								<p class="display mb-2 text-4xl">{minutes(draft.policy.quota.daily_minutes)}</p>
-								<input type="range" min="15" max="360" step="15" class="w-full accent-[var(--sun)]" aria-label="Minutes par jour" bind:value={draft.policy.quota.daily_minutes} />
-							</div>
-						{/if}
-					</div>
-					<div>
-						<Switch
-							checked={draft.policy.quota.weekly_minutes !== null}
-							label="Limiter aussi le temps par semaine"
-							description="Du lundi au dimanche."
-							onchange={(on) => (draft!.policy.quota.weekly_minutes = on ? 600 : null)}
-						/>
-						{#if draft.policy.quota.weekly_minutes !== null}
-							<div class="pb-4">
-								<p class="display mb-2 text-4xl">{minutes(draft.policy.quota.weekly_minutes)}</p>
-								<input type="range" min="60" max="2400" step="30" class="w-full accent-[var(--sun)]" aria-label="Minutes par semaine" bind:value={draft.policy.quota.weekly_minutes} />
-							</div>
-						{/if}
-					</div>
-				</div>
-			</section>
-
-			<section class="panel">
-				<h2>Horaires</h2>
-				<p class="muted mb-2 text-sm">En dehors de ces plages, la session se verrouille, après un rappel à 5 minutes puis à 1 minute.</p>
-				<ScheduleEditor bind:schedule={draft.policy.schedule} />
-			</section>
-		{:else if tab === 'filtre'}
 			<section class="panel py-2">
 				<Switch
-					bind:checked={draft.policy.filter.allow_requests}
-					label="{saved.name} peut faire des demandes"
-					description="Depuis son espace : obtenir du temps, ouvrir un site ou l'un des services réglés « sur demande ». Vous répondez depuis l'accueil."
+					checked={draft.policy.holidays !== null}
+					label="Règles différentes pendant les vacances scolaires"
+					description="Horaires, temps et filtre propres aux vacances. Les périodes se choisissent dans les réglages."
+					onchange={setHolidays}
 				/>
 			</section>
-			<section class="panel">
-				{#if catalog}
-					<FilterEditor bind:filter={draft.policy.filter} bind:catalog childName={saved.name} />
-				{/if}
-			</section>
+			{@render periodPicker()}
+			{#if period === 'holidays' && draft.policy.holidays}
+				{@render timeRules(draft.policy.holidays)}
+			{:else}
+				{@render timeRules(draft.policy)}
+			{/if}
+		{:else if tab === 'filtre'}
+			{@render periodPicker()}
+			{#if period === 'holidays' && draft.policy.holidays}
+				{@render filterRules(draft.policy.holidays)}
+			{:else}
+				{@render filterRules(draft.policy)}
+			{/if}
 		{:else}
 			<section class="panel space-y-5">
 				<div class="grid gap-4 sm:grid-cols-2">
