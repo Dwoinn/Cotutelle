@@ -132,6 +132,27 @@ Environment=COTUTELLE_LOCK_COMMAND=mon-verrou --option
 Si aucun verrou ne fonctionne, les parents reçoivent une alerte et le DNS du
 compte est coupé tant que l'accès reste fermé.
 
+### Temps d'écran et écran éteint
+
+Le temps ne compte que pour la session au premier plan, déverrouillée et en
+usage. L'agent lit l'état de logind (`LockedHint`, `IdleHint`) et, comme tous
+les bureaux ne le renseignent pas, demande aussi au bureau si son économiseur
+d'écran est actif (`org.gnome.ScreenSaver`, `org.freedesktop.ScreenSaver`
+pour KDE, équivalents Cinnamon, MATE et XFCE, `hyprctl` pour Hyprland). Un
+écran noir, voilé ou verrouillé ne compte donc pas, qu'il le soit à la main,
+après un moment d'inactivité ou au retour de veille. Une vidéo en plein
+écran, qui retient l'économiseur, compte.
+
+Pour vérifier ce que l'agent voit :
+
+```bash
+cotutelle-agent status
+```
+
+La clé `sessions` donne, pour chaque session ouverte, `en usage`,
+`écran éteint ou inactive`, `verrouillée` ou `arrière-plan`, et le journal
+(`journalctl -u cotutelle-agent`) consigne chaque changement.
+
 ### Diagnostic
 
 ```bash

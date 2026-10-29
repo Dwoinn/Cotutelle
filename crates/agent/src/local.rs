@@ -81,6 +81,19 @@ async fn status(State(rt): State<Arc<Runtime>>) -> Json<Value> {
             })
         })
         .collect();
+    let sessions: Vec<Value> = rt
+        .sessions()
+        .iter()
+        .map(|s| {
+            json!({
+                "user": s.user,
+                "active": s.active,
+                "locked": s.locked,
+                "idle": s.idle,
+                "state": s.state(),
+            })
+        })
+        .collect();
     let state = rt.state.read().expect("verrou état");
     Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
@@ -88,6 +101,7 @@ async fn status(State(rt): State<Arc<Runtime>>) -> Json<Value> {
         "connected": rt.is_connected(),
         "policy_issued_at": state.as_ref().map(|s| s.issued_at),
         "foreground": rt.foreground(),
+        "sessions": sessions,
         "accounts": accounts,
         "blocklists": rt.loaded_lists.lock().expect("verrou listes").iter().map(|(c, _)| c.clone()).collect::<Vec<_>>(),
         "dry_run": rt.dry_run,

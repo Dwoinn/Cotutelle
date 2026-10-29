@@ -65,6 +65,7 @@ pub fn step(
 ) -> Vec<Action> {
     let foreground = sessions.iter().find(|s| s.in_use());
     *rt.foreground.write().expect("verrou premier plan") = foreground.map(|s| s.user.clone());
+    *rt.sessions.write().expect("verrou sessions") = sessions.to_vec();
 
     // Le temps ne compte que pour un compte géré, devant l'écran et actif.
     if let Some(session) = foreground.filter(|s| !s.idle && rt.account(&s.user).is_some()) {
@@ -181,11 +182,20 @@ pub fn lock_account(rt: &Runtime, os_account: &str) {
     }
 }
 
+/// Résumé des sessions pour le journal : `louis (en usage), papa (arrière-plan)`.
+fn describe(sessions: &[Session]) -> String {
+    if sessions.is_empty() {
+        return "aucune".to_string();
+    }
+    sessions.iter().map(|s| format!("{} ({})", s.user, s.state())).collect::<Vec<_>>().join(", ")
+}
+
 /// Boucle de surveillance. `enforced` est l'adresse du résolveur local quand
 /// la protection DNS est active et doit être vérifiée périodiquement.
 pub async fn run(rt: Arc<Runtime>, enforced: Option<SocketAddr>) {
     let mut warned = HashMap::new();
     let mut lock_watch = LockWatch::default();
+    let mut last_sessions: Option<Vec<Session>> = None;
     let mut last_tick = Instant::now();
     let mut last_save = Instant::now();
     let mut last_check = Instant::now();
@@ -214,6 +224,12 @@ pub async fn run(rt: Arc<Runtime>, enforced: Option<SocketAddr>) {
         };
         match sessions {
             Ok(Ok(sessions)) => {
+                // Chaque changement d'état est journalisé : c'est ce qui
+                // permet de comprendre après coup pourquoi le temps a compté.
+                if last_sessions.as_ref() != Some(&sessions) {
+                    tracing::info!(sessions = %describe(&sessions), "sessions");
+                    last_sessions = Some(sessions.clone());
+                }
                 let actions = step(&rt, &sessions, elapsed, now, &mut warned);
                 // Verrouiller attend la confirmation du bureau : hors du fil asynchrone.
                 let outcomes = {
@@ -346,6 +362,7 @@ mod tests {
             loaded_lists: Default::default(),
             usage: Default::default(),
             foreground: Default::default(),
+            sessions: Default::default(),
             stats: Default::default(),
             network_dns: Default::default(),
             outbox: Default::default(),

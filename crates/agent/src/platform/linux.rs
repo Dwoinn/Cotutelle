@@ -174,7 +174,16 @@ fn hyprland_locked(monitors_json: &str) -> Option<bool> {
 
 /// Lance un programme dans la session graphique de l'utilisateur.
 fn run_in_session(session: &Session, program: &str, args: &[&str]) -> Result<String> {
-    let mut env = session_environment(session.uid);
+    run_in_session_env(session, session_environment(session.uid), program, args)
+}
+
+/// Comme [`run_in_session`], avec un environnement déjà relevé.
+fn run_in_session_env(
+    session: &Session,
+    mut env: Vec<(String, String)>,
+    program: &str,
+    args: &[&str],
+) -> Result<String> {
     if env.is_empty() {
         // Session sans processus graphique repéré : le strict minimum.
         let runtime_dir = format!("/run/user/{}", session.uid);
@@ -190,14 +199,71 @@ fn run_in_session(session: &Session, program: &str, args: &[&str]) -> Result<Str
     run("runuser", &argv)
 }
 
+/// Écran d'une session tel que son bureau le voit, en complément de logind.
+/// Tous les bureaux ne renseignent pas `LockedHint` (Hyprland) ni `IdleHint`
+/// (GNOME le fait, d'autres non) : sans cela, un écran éteint par
+/// l'économiseur passe pour utilisé.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScreenState {
+    /// Quelqu'un peut s'en servir.
+    InUse,
+    /// Économiseur actif : écran noir ou voilé, sans verrou connu.
+    Saver,
+    Locked,
+}
+
+/// Économiseurs d'écran D-Bus selon le bureau (`XDG_CURRENT_DESKTOP`). Tous
+/// exposent la même méthode `GetActive`, sur un chemin dérivé de leur nom.
+const SCREENSAVERS: &[(&str, &str)] = &[
+    ("GNOME", "org.gnome.ScreenSaver"),
+    ("Cinnamon", "org.cinnamon.ScreenSaver"),
+    ("MATE", "org.mate.ScreenSaver"),
+    ("XFCE", "org.xfce.ScreenSaver"),
+];
+/// Pour les autres bureaux, KDE en tête : l'interface commune.
+const DEFAULT_SCREENSAVER: &str = "org.freedesktop.ScreenSaver";
+
+fn screensaver_for(desktop: &str) -> &'static str {
+    let parts: Vec<String> = desktop.split(':').map(str::to_ascii_lowercase).collect();
+    SCREENSAVERS
+        .iter()
+        .find(|(name, _)| parts.iter().any(|part| part == &name.to_ascii_lowercase()))
+        .map_or(DEFAULT_SCREENSAVER, |(_, service)| service)
+}
+
+/// Lit le booléen d'une réponse `busctl --json=short call … GetActive`.
+fn busctl_bool(json: &str) -> Option<bool> {
+    let reply: serde_json::Value = serde_json::from_str(json).ok()?;
+    reply.get("data")?.as_array()?.first()?.as_bool()
+}
+
+/// L'économiseur du bureau est-il actif ? `None` si le bureau ne répond pas.
+fn screensaver_active(session: &Session, env: Vec<(String, String)>) -> Option<bool> {
+    let desktop =
+        env.iter().find(|(n, _)| n == "XDG_CURRENT_DESKTOP").map_or("", |(_, v)| v.as_str());
+    let service = screensaver_for(desktop);
+    let path = format!("/{}", service.replace('.', "/"));
+    let args = ["--user", "--json=short", "call", service, &path, service, "GetActive"];
+    busctl_bool(&run_in_session_env(session, env, "busctl", &args).ok()?)
+}
+
+fn desktop_screen(session: &Session) -> Option<ScreenState> {
+    let env = session_environment(session.uid);
+    if env.iter().any(|(n, _)| n == "HYPRLAND_INSTANCE_SIGNATURE") {
+        let monitors = run_in_session_env(session, env, "hyprctl", &["-j", "monitors"]).ok()?;
+        return hyprland_locked(&monitors)
+            .map(|locked| if locked { ScreenState::Locked } else { ScreenState::InUse });
+    }
+    // L'économiseur suit les inhibitions du bureau : une vidéo en plein
+    // écran le retient, et ce temps-là compte. Le temps d'inactivité brut
+    // (`org.gnome.Mutter.IdleMonitor`) l'ignorerait, on ne s'en sert pas.
+    screensaver_active(session, env)
+        .map(|active| if active { ScreenState::Saver } else { ScreenState::InUse })
+}
+
 /// État de verrouillage vu du bureau, quand logind ne le connaît pas.
 fn desktop_locked(session: &Session) -> Option<bool> {
-    let is_hyprland =
-        session_environment(session.uid).iter().any(|(n, _)| n == "HYPRLAND_INSTANCE_SIGNATURE");
-    if !is_hyprland {
-        return None;
-    }
-    hyprland_locked(&run_in_session(session, "hyprctl", &["-j", "monitors"]).ok()?)
+    desktop_screen(session).map(|state| state == ScreenState::Locked)
 }
 
 fn logind_locked(session: &Session) -> bool {
@@ -409,9 +475,14 @@ impl Platform for Linux {
             // Une session peut se fermer entre les deux appels : on l'ignore.
             let Ok(text) = run("loginctl", &args) else { continue };
             if let Some(mut session) = session_from_properties(id, &parse_properties(&text)) {
-                // Certains bureaux ne renseignent pas LockedHint : on leur demande.
-                if session.active && !session.locked && desktop_locked(&session) == Some(true) {
-                    session.locked = true;
+                // Logind ne sait que ce que le bureau lui dit : on demande
+                // aussi au bureau, pour ceux qui taisent le verrou ou l'inactivité.
+                if session.active && !session.locked {
+                    match desktop_screen(&session) {
+                        Some(ScreenState::Locked) => session.locked = true,
+                        Some(ScreenState::Saver) => session.idle = true,
+                        Some(ScreenState::InUse) | None => {}
+                    }
                 }
                 sessions.push(session);
             }
@@ -558,6 +629,25 @@ mod tests {
         // Version de Hyprland sans ce champ, ou sortie illisible : on ne conclut pas.
         assert_eq!(hyprland_locked(r#"[{"name":"Virtual-1"}]"#), None);
         assert_eq!(hyprland_locked("erreur"), None);
+    }
+
+    #[test]
+    fn screensaver_is_chosen_from_the_desktop_name() {
+        // Ubuntu annonce `ubuntu:GNOME` ; la casse varie selon les bureaux.
+        assert_eq!(screensaver_for("ubuntu:GNOME"), "org.gnome.ScreenSaver");
+        assert_eq!(screensaver_for("X-Cinnamon:cinnamon"), "org.cinnamon.ScreenSaver");
+        assert_eq!(screensaver_for("KDE"), "org.freedesktop.ScreenSaver");
+        assert_eq!(screensaver_for(""), "org.freedesktop.ScreenSaver");
+    }
+
+    #[test]
+    fn screensaver_reply_is_read_from_busctl_json() {
+        // Forme exacte de `busctl --user --json=short call … GetActive`.
+        assert_eq!(busctl_bool(r#"{"type":"b","data":[true]}"#), Some(true));
+        assert_eq!(busctl_bool(r#"{"type":"b","data":[false]}"#), Some(false));
+        // Service absent, méthode inconnue : busctl n'écrit rien sur stdout.
+        assert_eq!(busctl_bool(""), None);
+        assert_eq!(busctl_bool(r#"{"type":"t","data":[12000]}"#), None);
     }
 
     #[test]

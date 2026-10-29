@@ -1,7 +1,7 @@
 //! État vivant de l'agent, partagé entre le résolveur DNS, la boucle de
 //! surveillance des sessions et la synchronisation avec le serveur.
 
-use crate::platform::Platform;
+use crate::platform::{Platform, Session};
 use crate::store::{Identity, Paths, UsageStore};
 use chrono::{DateTime, Datelike, Local, NaiveDate};
 use cotutelle_common::protocol::{AccountState, AgentMessage, DeviceState};
@@ -30,6 +30,8 @@ pub struct Runtime {
     pub usage: Mutex<UsageStore>,
     /// Compte actuellement devant l'écran, s'il y en a un.
     pub foreground: RwLock<Option<String>>,
+    /// Sessions telles que vues au dernier pas de surveillance.
+    pub sessions: RwLock<Vec<Session>>,
     /// Compteurs DNS par compte, vidés vers le serveur chaque minute.
     pub stats: Mutex<DnsStats<String>>,
     /// Résolveurs annoncés par le réseau, rafraîchis périodiquement.
@@ -56,6 +58,10 @@ impl Runtime {
 
     pub fn foreground(&self) -> Option<String> {
         self.foreground.read().expect("verrou premier plan").clone()
+    }
+
+    pub fn sessions(&self) -> Vec<Session> {
+        self.sessions.read().expect("verrou sessions").clone()
     }
 
     pub fn is_connected(&self) -> bool {

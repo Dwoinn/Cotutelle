@@ -353,6 +353,20 @@ des comptes ordinaires vers son résolveur au lieu de le rejeter.
 **Reste à vérifier** : le parcours complet sous Ubuntu et GNOME après cette
 correction.
 
+**Constat du 29 octobre 2026**, sur la même machine : les parents voient du
+temps décompté session verrouillée, écran éteint ou au retour de veille. Sur
+place, GNOME renseigne bien `LockedHint` et `IdleHint`, et le compteur de
+l'agent reste immobile session verrouillée. Deux causes restent possibles :
+la **connexion automatique** de l'enfant à l'allumage (le temps compte dès le
+démarrage, personne ou non devant l'écran, jusqu'à l'économiseur), et le
+« temps restant » affiché, qui est le temps avant la prochaine fermeture
+(fin de plage comprise) et baisse donc sans usage. En attendant la preuve,
+l'agent demande aussi au bureau, par D-Bus, si son économiseur est actif,
+pour les bureaux qui ne renseignent pas logind, journalise chaque changement
+d'état de session et l'expose dans `cotutelle-agent status`. Le temps
+d'inactivité brut n'est pas utilisé : il ignorerait une vidéo regardée sans
+toucher au clavier.
+
 Limites assumées du MVP :
 
 - **Compte au premier plan** (D12) : quand un parent ouvre sa session sur

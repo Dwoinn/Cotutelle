@@ -126,6 +126,7 @@ async fn run(
         blocklists: Default::default(),
         loaded_lists: Default::default(),
         foreground: Default::default(),
+        sessions: Default::default(),
         stats: Default::default(),
         network_dns: Default::default(),
         outbox: Default::default(),

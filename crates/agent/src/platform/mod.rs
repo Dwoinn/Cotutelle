@@ -20,6 +20,8 @@ pub struct Session {
     /// Session au premier plan sur son siège.
     pub active: bool,
     pub locked: bool,
+    /// Personne ne s'en sert : sans activité selon logind, ou écran éteint
+    /// par l'économiseur du bureau. Le temps d'écran ne compte pas.
     pub idle: bool,
 }
 
@@ -27,6 +29,19 @@ impl Session {
     /// Quelqu'un est réellement devant l'écran de cette session.
     pub fn in_use(&self) -> bool {
         self.active && !self.locked
+    }
+
+    /// État lisible, pour le journal et `cotutelle-agent status`.
+    pub fn state(&self) -> &'static str {
+        if !self.active {
+            "arrière-plan"
+        } else if self.locked {
+            "verrouillée"
+        } else if self.idle {
+            "écran éteint ou inactive"
+        } else {
+            "en usage"
+        }
     }
 }
 
