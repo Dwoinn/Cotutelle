@@ -32,6 +32,7 @@ pub fn router() -> Router<Shared> {
         .route("/children", get(children::list).post(children::create))
         .route("/children/{id}", get(children::get).put(children::update).delete(children::remove))
         .route("/children/{id}/activity", get(children::activity))
+        .route("/children/{id}/summary", get(overview::summary))
         .route("/children/{id}/space", get(child::preview))
         // Appareils
         .route("/devices", get(devices::list).post(devices::create_network))

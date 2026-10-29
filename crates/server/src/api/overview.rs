@@ -28,57 +28,93 @@ async fn open_alerts(state: &Shared) -> Result<Vec<Value>, ApiError> {
         .collect())
 }
 
+/// Ce que l'accueil et la fiche montrent d'un enfant à l'instant : accès,
+/// temps consommé, mesures en cours, appareils.
+struct Snapshot<'a> {
+    grants: &'a [model::Grant],
+    devices: &'a [Value],
+    blocked: &'a [(String, String, i64)],
+    now: chrono::DateTime<Local>,
+}
+
+async fn child_summary(
+    state: &Shared,
+    child: &model::Child,
+    snapshot: &Snapshot<'_>,
+) -> Result<Value, ApiError> {
+    let Snapshot { grants, devices, blocked, now } = *snapshot;
+    let seconds = model::usage_seconds(&state.db, &child.id, None).await?;
+    let child_grants = model::grants_of_child(grants, &child.id);
+    let status =
+        model::access_now(&child.policy, &child_grants, model::usage_from_seconds(seconds));
+    let next = child.policy.schedule.next_opening(now.weekday(), now.time());
+
+    // Appareils de l'enfant : comptes rattachés ou appareil réseau attribué.
+    let mine: Vec<Value> = devices
+        .iter()
+        .filter_map(|d| {
+            let accounts: Vec<&str> = d["accounts"]
+                .as_object()?
+                .iter()
+                .filter(|(_, c)| c.as_str() == Some(child.id.as_str()))
+                .map(|(a, _)| a.as_str())
+                .collect();
+            let assigned = d["child_id"].as_str() == Some(child.id.as_str());
+            if accounts.is_empty() && !assigned {
+                return None;
+            }
+            let active = d["active_accounts"]
+                .as_array()
+                .is_some_and(|list| list.iter().any(|a| accounts.contains(&a.as_str().unwrap_or(""))));
+            Some(json!({ "id": d["id"], "name": d["name"], "kind": d["kind"], "online": d["online"], "active": active }))
+        })
+        .collect();
+
+    Ok(json!({
+        "id": child.id,
+        "name": child.name,
+        "emoji": child.emoji,
+        "color": child.color,
+        "status": status,
+        "used_today_seconds": seconds.0,
+        "used_week_seconds": seconds.1,
+        "today_ranges": child.policy.schedule.ranges_for(now.weekday()),
+        "blocked_today": blocked.iter().filter(|(c, _, _)| *c == child.id).map(|(_, _, n)| n).sum::<i64>(),
+        "next_opening": next.map(|(day, time)| json!({ "day": day.to_string(), "time": time.format("%H:%M").to_string() })),
+        "grants": grants.iter().filter(|g| g.child_id.as_deref() == Some(child.id.as_str())).collect::<Vec<_>>(),
+        "blocked_services": child.policy.filter.blocked_services,
+        "requestable_services": child.policy.filter.requestable_services,
+        "devices": mine,
+    }))
+}
+
+/// Le résumé d'un seul enfant, tel que l'accueil le montre, pour sa fiche.
+pub async fn summary(
+    _: Parent,
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+) -> ApiResult<Value> {
+    let child = model::child(&state.db, &id).await?.ok_or_else(|| ApiError::not_found("enfant"))?;
+    let grants = model::live_grants(&state.db).await?;
+    let devices = list_devices(&state).await?;
+    let blocked = model::blocked_today(&state.db).await?;
+    let snapshot =
+        Snapshot { grants: &grants, devices: &devices, blocked: &blocked, now: Local::now() };
+    Ok(Json(
+        json!({ "child": child_summary(&state, &child, &snapshot).await?, "now": util::now() }),
+    ))
+}
+
 pub async fn dashboard(_: Parent, State(state): State<Shared>) -> ApiResult<Value> {
     let grants = model::live_grants(&state.db).await?;
     let devices = list_devices(&state).await?;
-    let now = Local::now();
     let blocked = model::blocked_today(&state.db).await?;
+    let snapshot =
+        Snapshot { grants: &grants, devices: &devices, blocked: &blocked, now: Local::now() };
 
     let mut children = Vec::new();
     for child in model::children(&state.db).await? {
-        let seconds = model::usage_seconds(&state.db, &child.id, None).await?;
-        let child_grants = model::grants_of_child(&grants, &child.id);
-        let status =
-            model::access_now(&child.policy, &child_grants, model::usage_from_seconds(seconds));
-        let next = child.policy.schedule.next_opening(now.weekday(), now.time());
-
-        // Appareils de l'enfant : comptes rattachés ou appareil réseau attribué.
-        let mine: Vec<Value> = devices
-            .iter()
-            .filter_map(|d| {
-                let accounts: Vec<&str> = d["accounts"]
-                    .as_object()?
-                    .iter()
-                    .filter(|(_, c)| c.as_str() == Some(child.id.as_str()))
-                    .map(|(a, _)| a.as_str())
-                    .collect();
-                let assigned = d["child_id"].as_str() == Some(child.id.as_str());
-                if accounts.is_empty() && !assigned {
-                    return None;
-                }
-                let active = d["active_accounts"]
-                    .as_array()
-                    .is_some_and(|list| list.iter().any(|a| accounts.contains(&a.as_str().unwrap_or(""))));
-                Some(json!({ "id": d["id"], "name": d["name"], "kind": d["kind"], "online": d["online"], "active": active }))
-            })
-            .collect();
-
-        children.push(json!({
-            "id": child.id,
-            "name": child.name,
-            "emoji": child.emoji,
-            "color": child.color,
-            "status": status,
-            "used_today_seconds": seconds.0,
-            "used_week_seconds": seconds.1,
-            "today_ranges": child.policy.schedule.ranges_for(now.weekday()),
-            "blocked_today": blocked.iter().filter(|(c, _, _)| *c == child.id).map(|(_, _, n)| n).sum::<i64>(),
-            "next_opening": next.map(|(day, time)| json!({ "day": day.to_string(), "time": time.format("%H:%M").to_string() })),
-            "grants": grants.iter().filter(|g| g.child_id.as_deref() == Some(child.id.as_str())).collect::<Vec<_>>(),
-            "blocked_services": child.policy.filter.blocked_services,
-            "requestable_services": child.policy.filter.requestable_services,
-            "devices": mine,
-        }));
+        children.push(child_summary(&state, &child, &snapshot).await?);
     }
 
     let manifest = state.blocklists.manifest();
