@@ -5,7 +5,6 @@
 	import type { AccessStatus, Grant, GrantTarget } from '#lib/types.ts';
 	import Pause from '@lucide/svelte/icons/pause';
 	import Play from '@lucide/svelte/icons/play';
-	import Segmented from './Segmented.svelte';
 	import Sheet from './Sheet.svelte';
 
 	// Actions de temps pour un enfant : ajouter, mettre en pause, ouvrir hors horaires.
@@ -31,7 +30,6 @@
 		ondone: () => void;
 	} = $props();
 
-	let pauseMinutes = $state(60);
 	let busy = $state(false);
 
 	const pause = $derived(grants.find((g) => g.target.kind === 'pause'));
@@ -109,22 +107,19 @@
 		{#if !pause}
 			<section>
 				<h3 class="mb-2">Mettre en pause</h3>
-				<Segmented
-					bind:value={pauseMinutes}
-					label="Durée de la pause"
-					options={[
-						{ value: 30, label: '30 min' },
-						{ value: 60, label: '1 h' },
-						{ value: 120, label: '2 h' }
-					]}
-				/>
-				<button
-					class="btn-quiet btn-block mt-2"
-					disabled={busy}
-					onclick={() => grant({ kind: 'pause' }, pauseMinutes, `${name} est en pause pendant ${minutes(pauseMinutes)}`)}
-				>
-					<Pause size={20} /> Mettre en pause {minutes(pauseMinutes)}
-				</button>
+				<!-- Même geste que l'ajout de temps : un bouton par durée. -->
+				<div class="grid grid-cols-3 gap-2">
+					{#each [30, 60, 120] as m (m)}
+						<button
+							class="btn-quiet display min-h-16 gap-1.5 px-1 text-xl"
+							disabled={busy}
+							aria-label="Mettre en pause {minutes(m)}"
+							onclick={() => grant({ kind: 'pause' }, m, `${name} est en pause pendant ${minutes(m)}`)}
+						>
+							<Pause size={22} /> {minutes(m)}
+						</button>
+					{/each}
+				</div>
 				<p class="hint">L'écran se verrouille tout de suite, sans toucher à son temps du jour.</p>
 			</section>
 		{/if}

@@ -4,8 +4,8 @@
 	import { app, attempt, catalog } from '#lib/app.svelte.ts';
 	import Avatar from '#lib/components/Avatar.svelte';
 	import Dial from '#lib/components/Dial.svelte';
+	import DurationPicker from '#lib/components/DurationPicker.svelte';
 	import FilterSheet from '#lib/components/FilterSheet.svelte';
-	import Segmented from '#lib/components/Segmented.svelte';
 	import ServiceLogo from '#lib/components/ServiceLogo.svelte';
 	import Sheet from '#lib/components/Sheet.svelte';
 	import Shield from '#lib/components/Shield.svelte';
@@ -33,7 +33,6 @@
 	let deviceOpen = $state(false);
 	let durationFor = $state<ChildRequest | null>(null);
 	let durationOpen = $state(false);
-	let duration = $state(30);
 	let addOpen = $state(false);
 	let newName = $state('');
 	let newYear = $state<number | null>(null);
@@ -156,7 +155,6 @@
 								class="mt-2 min-h-11 w-full text-sm font-semibold underline underline-offset-4"
 								onclick={() => {
 									durationFor = request;
-									duration = request.minutes ?? 30;
 									durationOpen = true;
 								}}
 							>
@@ -295,6 +293,7 @@
 			subject={{ child_id: filterChild.id }}
 			{services}
 			blockedServices={filterChild.blocked_services}
+			requestableServices={filterChild.requestable_services}
 			grants={filterGrants(filterChild.grants)}
 			now={data.now}
 			blockedToday={filterChild.blocked_today ?? 0}
@@ -320,17 +319,7 @@
 	<Sheet bind:open={durationOpen} title="Accorder à {durationFor?.child_name ?? ''}">
 		{#if durationFor}
 			<p class="muted -mt-2 mb-4">{durationFor.label}, pendant combien de temps ?</p>
-			<Segmented
-				bind:value={duration}
-				label="Durée accordée"
-				options={[
-					{ value: 15, label: '15 min' },
-					{ value: 30, label: '30 min' },
-					{ value: 60, label: '1 h' },
-					{ value: 120, label: '2 h' }
-				]}
-			/>
-			<button class="btn-primary btn-block mt-4" onclick={() => approve(durationFor!, duration)}>Accorder {minutes(duration)}</button>
+			<DurationPicker onpick={(m) => approve(durationFor!, m)} />
 		{/if}
 	</Sheet>
 

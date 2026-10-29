@@ -76,6 +76,7 @@ pub async fn dashboard(_: Parent, State(state): State<Shared>) -> ApiResult<Valu
             "next_opening": next.map(|(day, time)| json!({ "day": day.to_string(), "time": time.format("%H:%M").to_string() })),
             "grants": grants.iter().filter(|g| g.child_id.as_deref() == Some(child.id.as_str())).collect::<Vec<_>>(),
             "blocked_services": child.policy.filter.blocked_services,
+            "requestable_services": child.policy.filter.requestable_services,
             "devices": mine,
         }));
     }

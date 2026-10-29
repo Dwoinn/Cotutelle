@@ -104,6 +104,8 @@ export type ChildSummary = {
 	next_opening: Opening;
 	grants: Grant[];
 	blocked_services: string[];
+	/** Parmi les services bloqués, ceux que l'enfant peut demander. */
+	requestable_services: string[];
 	devices: { id: string; name: string; kind: string; online: boolean; active: boolean }[];
 };
 
