@@ -88,10 +88,19 @@ impl ksni::Tray for Tray {
     }
 }
 
+/// Lance l'icône de barre. Au démarrage de la session, l'hôte
+/// StatusNotifierWatcher (extension AppIndicator sous GNOME) n'est souvent
+/// pas encore là : on l'attend plutôt que d'échouer, l'icône apparaîtra
+/// quand il se présentera. Sans hôte du tout, elle n'apparaît jamais ; les
+/// notifications et les fenêtres n'en dépendent pas.
 pub async fn spawn(
     commands: mpsc::UnboundedSender<Command>,
     icon: String,
     icon_dir: String,
 ) -> Result<ksni::Handle<Tray>> {
-    Tray { state: None, commands, icon, icon_dir }.spawn().await.context("icône de barre")
+    Tray { state: None, commands, icon, icon_dir }
+        .assume_sni_available(true)
+        .spawn()
+        .await
+        .context("icône de barre")
 }

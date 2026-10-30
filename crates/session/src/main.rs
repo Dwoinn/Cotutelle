@@ -107,7 +107,8 @@ impl Command {
 struct App {
     cli: Cli,
     notifier: Notifier,
-    tray: ksni::Handle<tray::Tray>,
+    /// L'icône de barre, quand le bus l'a acceptée.
+    tray: Option<ksni::Handle<tray::Tray>>,
     /// Les fenêtres natives, quand GTK a pu démarrer.
     ui: Option<ui::Ui>,
     state: Option<SessionState>,
@@ -135,7 +136,9 @@ impl App {
             ui.dismiss_closed();
         }
         self.state = state.clone();
-        self.tray.update(|tray| tray.state = state).await;
+        if let Some(tray) = &self.tray {
+            tray.update(|tray| tray.state = state).await;
+        }
     }
 
     async fn on_event(&mut self, event: AgentEvent) {
@@ -251,7 +254,15 @@ async fn main() -> Result<()> {
 
     let (commands_tx, mut commands) = mpsc::unbounded_channel();
     let notifier = Notifier::new(&bus, commands_tx.clone()).await?;
-    let tray = tray::spawn(commands_tx.clone(), cli.icon.clone(), cli.icon_dir.clone()).await?;
+    // Sans icône de barre, l'assistant sert quand même : avis et demandes.
+    let tray = match tray::spawn(commands_tx.clone(), cli.icon.clone(), cli.icon_dir.clone()).await
+    {
+        Ok(tray) => Some(tray),
+        Err(e) => {
+            tracing::warn!(error = %e, "pas d'icône de barre");
+            None
+        }
+    };
     let ui = ui::Ui::start(commands_tx, cli.icon.clone(), cli.icon_dir.clone());
     let mut app = App { cli, notifier, tray, ui, state: None, writer: None, welcomed: false };
     tracing::info!(socket = %app.cli.socket.display(), "assistant de session démarré");
