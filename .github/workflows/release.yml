@@ -52,7 +52,6 @@ jobs:
         run: |
           docker buildx build -f docker/Dockerfile.agent --output type=local,dest=dist/bin .
           dist/bin/cotutelle-agent --version
-          dist/bin/cotutelle-session --version
       # Les scripts de paquets lisent la version avec cargo.
       - run: rustup toolchain install
       - name: Paquets .deb et .rpm
@@ -61,7 +60,9 @@ jobs:
           SESSION_BIN: dist/bin/cotutelle-session
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends rpm
+          # libadwaita : l'assistant de session, construit avec ses fenêtres GTK 4, en a besoin pour démarrer.
+          sudo apt-get install -y --no-install-recommends rpm libadwaita-1-0
+          dist/bin/cotutelle-session --version
           cp "$(scripts/build-deb.sh)" "$(scripts/build-rpm.sh)" dist/
       - name: Archive pour les autres distributions
         run: |
