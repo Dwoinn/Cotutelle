@@ -13,9 +13,16 @@ jobs:
       # La version et les composants viennent de rust-toolchain.toml.
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
+      # En-têtes des fenêtres natives de l'assistant de session (feature gtk).
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libadwaita-1-dev
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # L'assistant doit aussi se construire sans GTK.
+      - run: cargo clippy -p cotutelle-session --no-default-features --all-targets -- -D warnings
+      - run: cargo test -p cotutelle-session --no-default-features
 
   web:
     runs-on: ubuntu-latest

@@ -80,7 +80,7 @@ impl ksni::Tray for Tray {
                     Some(Command::AskService(service.id.clone())),
                 ));
             }
-            items.push(Self::item("Demander autre chose…".into(), Some(Command::OpenSpace)));
+            items.push(Self::item("Demander autre chose…".into(), Some(Command::AskMore)));
         }
         items.push(MenuItem::Separator);
         items.push(Self::item("Mon espace".into(), Some(Command::OpenSpace)));

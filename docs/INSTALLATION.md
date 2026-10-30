@@ -118,6 +118,20 @@ demandes. Elles arrivent aux parents comme celles de l'espace enfant, et la
 réponse revient sur le bureau. Dans la session d'un parent, l'icône reste
 cachée.
 
+Deux fenêtres complètent les notifications. Quand l'accès se ferme, ou s'il
+est déjà fermé à l'ouverture de session, un écran plein donne le motif, compte
+les secondes avant le verrou et propose « Demander du temps » (trente minutes)
+ou « Fermer ». L'entrée de menu « Demander autre chose… » ouvre un formulaire :
+un service proposé par les parents, un autre site ou du temps en plus, pendant
+combien de temps (de 5 minutes à 2 heures) et un mot pour eux. Ces fenêtres
+sont en GTK 4 et libadwaita, que les paquets recommandent (`libgtk-4-1` et
+`libadwaita-1-0` sous Debian et Ubuntu, `gtk4` et `libadwaita` sous Fedora et
+RHEL) ; l'assistant publié demande une distribution de 2022 ou plus récente
+(Debian 12, Ubuntu 22.04, RHEL 9). Sans fenêtres possibles (session sans
+affichage), la fermeture reste une notification critique et « Demander autre
+chose… » ouvre l'espace enfant dans le navigateur. Pour un assistant sans GTK
+du tout, compilez-le avec `--no-default-features`.
+
 Quand l'assistant est là, l'agent laisse trente secondes entre l'explication
 et le verrouillage ; sans lui (autre bureau, session texte), il garde ses
 notifications `notify-send` et verrouille aussitôt. Sous GNOME, l'icône de

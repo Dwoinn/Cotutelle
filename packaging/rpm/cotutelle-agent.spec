@@ -20,6 +20,9 @@ Requires:       nftables
 Recommends:     systemd-resolved
 Recommends:     /usr/bin/notify-send
 Recommends:     xdg-utils
+# Fenêtres natives de l'assistant de session.
+Recommends:     gtk4
+Recommends:     libadwaita
 
 %description
 Applique sur cet ordinateur les règles définies par les parents sur le

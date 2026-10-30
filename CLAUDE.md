@@ -14,6 +14,9 @@ rouvrent pas sans discussion.
 - L'agent se teste avec `run --dry-run` : il ne verrouille rien et ne touche
   ni à nftables ni à systemd-resolved. Ne jamais le lancer sans ce drapeau sur
   un poste de travail.
+- `cotutelle-session` a ses fenêtres derrière la feature `gtk` (par défaut) :
+  il faut `libgtk-4-dev` et `libadwaita-1-dev` pour compiler le workspace.
+  Vérifier aussi `-p cotutelle-session --no-default-features`.
 
 ## Règles
 

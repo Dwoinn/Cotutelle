@@ -56,6 +56,11 @@ flate2 = "1"
 # Bureau de l'enfant (assistant de session) : D-Bus en Rust pur
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 ksni = "0.3"
+# Fenêtres natives de l'assistant (feature `gtk` de cotutelle-session). API
+# de GTK 4.0 et libadwaita 1.0 seulement : le binaire tourne sur Ubuntu 22.04
+# et Debian 12.
+gtk4 = "0.11"
+libadwaita = "0.9"
 
 [profile.release]
 lto = "thin"

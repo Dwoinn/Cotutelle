@@ -51,6 +51,7 @@ Maintainer: Dwoinn <dwoinn@users.noreply.github.com>
 Section: admin
 Priority: optional
 Depends: libc6, systemd, nftables, libnotify-bin, xdg-utils
+Recommends: libgtk-4-1, libadwaita-1-0
 Installed-Size: $(du -sk "$ROOT" | cut -f1)
 Homepage: https://github.com/Dwoinn/cotutelle
 Description: Agent de contrôle parental Cotutelle

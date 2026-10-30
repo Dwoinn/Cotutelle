@@ -1,8 +1,8 @@
-//! Phrases de l'indicateur et du message d'accueil.
+//! Phrases de l'indicateur, du message d'accueil et des demandes.
 
 use chrono::{Datelike, Local};
-use cotutelle_common::ClosedReason;
 use cotutelle_common::session::{SessionState, minutes_label, time_label};
+use cotutelle_common::{ClosedReason, GrantTarget};
 
 /// La ligne principale : « Il te reste 1 h 20 », « Temps d'écran terminé ».
 pub fn headline(state: &SessionState) -> String {
@@ -52,6 +52,31 @@ pub fn details(state: &SessionState) -> Vec<String> {
     lines
 }
 
+/// Le nom d'un service demandable, ou son identifiant s'il n'est plus proposé.
+pub fn service_label(state: &SessionState, id: &str) -> String {
+    state
+        .requestable_services
+        .iter()
+        .find(|s| s.id == id)
+        .map_or_else(|| id.to_string(), |s| s.label.clone())
+}
+
+/// Ce que l'enfant a demandé : « 30 min de plus », « YouTube pendant 1 h ».
+pub fn request_label(state: &SessionState, target: &GrantTarget, minutes: Option<u32>) -> String {
+    let what = match target {
+        GrantTarget::ExtraMinutes { minutes } => return format!("{minutes} min de plus"),
+        GrantTarget::Service { service } => service_label(state, service),
+        GrantTarget::Domain { domain } => domain.clone(),
+        GrantTarget::Category { category } => category.clone(),
+        GrantTarget::IgnoreSchedule => "hors horaires".to_string(),
+        GrantTarget::Pause => "une pause".to_string(),
+    };
+    match minutes {
+        Some(m) => format!("{what} pendant {}", minutes_label(m)),
+        None => what,
+    }
+}
+
 /// Le message d'accueil quand l'accès est ouvert.
 pub fn today(state: &SessionState) -> String {
     let mut text = match state.access.remaining_minutes {
@@ -70,6 +95,7 @@ mod tests {
     use super::*;
     use chrono::NaiveTime;
     use cotutelle_common::AccessStatus;
+    use cotutelle_common::session::ServiceRef;
 
     fn state(open: bool, remaining: Option<u32>) -> SessionState {
         SessionState {
@@ -99,5 +125,18 @@ mod tests {
         assert_eq!(details(&open), vec!["Jusqu'à 19 h", "Aujourd'hui : 10 min sur 1 h 30"]);
         assert_eq!(today(&open), "Il te reste 1 h 20 aujourd'hui, jusqu'à 19 h.");
         assert_eq!(headline(&state(false, Some(0))), "Temps d'écran terminé");
+    }
+
+    #[test]
+    fn requests_read_as_the_child_meant_them() {
+        let mut open = state(true, Some(80));
+        open.requestable_services =
+            vec![ServiceRef { id: "youtube".into(), label: "YouTube".into() }];
+        let youtube = GrantTarget::Service { service: "youtube".into() };
+        assert_eq!(request_label(&open, &youtube, Some(60)), "YouTube pendant 1 h");
+        let site = GrantTarget::Domain { domain: "exemple.fr".into() };
+        assert_eq!(request_label(&open, &site, Some(30)), "exemple.fr pendant 30 min");
+        let more = GrantTarget::ExtraMinutes { minutes: 30 };
+        assert_eq!(request_label(&open, &more, None), "30 min de plus");
     }
 }

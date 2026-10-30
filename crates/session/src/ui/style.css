@@ -1,0 +1,51 @@
+/* Écran d'une fermeture : Nuit en fond, Soleil pour le temps, comme
+   l'interface web (web/src/app.css). */
+window.cotutelle-closed {
+  background-color: #16203a;
+  color: #ffffff;
+}
+.cotutelle-closed statuspage .title {
+  font-size: 3em;
+  font-weight: 800;
+  color: #ffffff;
+}
+.cotutelle-closed statuspage .description {
+  font-size: 1.4em;
+  color: #c9d2e3;
+}
+.cotutelle-closed .countdown {
+  font-size: 4.5em;
+  font-weight: 200;
+  font-feature-settings: "tnum";
+  color: #ffc53d;
+  margin-top: 12px;
+}
+.cotutelle-closed .caption-line {
+  font-size: 1.05em;
+  color: #9eabc6;
+}
+.cotutelle-closed button.pill {
+  padding: 10px 28px;
+  font-size: 1.1em;
+}
+.cotutelle-closed button.pill:not(.sun) {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+.cotutelle-closed button.pill:not(.sun):hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Le bouton d'envoi, couleur Soleil, dans les deux fenêtres. */
+button.sun {
+  background-color: #ffc53d;
+  color: #16203a;
+  font-weight: 700;
+}
+button.sun:hover {
+  background-color: #ffd36a;
+}
+button.sun:disabled {
+  background-color: rgba(255, 197, 61, 0.35);
+  color: #16203a;
+}

@@ -30,8 +30,9 @@ jobs:
             exit 1
           fi
 
-  # L'agent et l'assistant de session, liés à une glibc ancienne, déclinés
-  # en .deb, .rpm et archive.
+  # L'agent (glibc 2.28) et l'assistant de session avec ses fenêtres GTK 4
+  # (glibc 2.34), construits par docker/Dockerfile.agent et déclinés en .deb,
+  # .rpm et archive.
   agent-linux:
     needs: version
     strategy:

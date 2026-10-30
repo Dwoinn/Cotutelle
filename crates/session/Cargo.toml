@@ -11,6 +11,13 @@ repository.workspace = true
 name = "cotutelle-session"
 path = "src/main.rs"
 
+[features]
+default = ["gtk"]
+# Fenêtres natives GTK 4 / libadwaita : écran plein quand l'accès est fermé,
+# formulaire de demande. Sans elle, l'assistant garde notifications et icône
+# de barre, et ne dépend d'aucune bibliothèque graphique.
+gtk = ["dep:gtk4", "dep:libadwaita"]
+
 [dependencies]
 cotutelle-common.workspace = true
 tokio.workspace = true
@@ -24,3 +31,5 @@ chrono.workspace = true
 zbus.workspace = true
 futures-util.workspace = true
 ksni.workspace = true
+gtk4 = { workspace = true, optional = true }
+libadwaita = { workspace = true, optional = true }

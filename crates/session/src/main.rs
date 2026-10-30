@@ -5,10 +5,19 @@
 //!
 //! Il n'impose rien : l'agent reste seul à verrouiller et à filtrer (D3,
 //! D4), et garde ses notifications de base si l'assistant n'est pas là.
+//!
+//! Avec la feature `gtk`, deux fenêtres natives s'ajoutent : l'écran plein
+//! d'une fermeture et le formulaire de demande. Sans elle, ou sans affichage
+//! au lancement, notifications et icône suffisent.
 
 mod notify;
 mod text;
 mod tray;
+#[cfg(feature = "gtk")]
+mod ui;
+#[cfg(not(feature = "gtk"))]
+#[path = "ui/stub.rs"]
+mod ui;
 
 use anyhow::{Context, Result};
 use chrono::{Datelike, Local};
@@ -50,28 +59,41 @@ struct Cli {
     icon_dir: String,
 }
 
-/// Ce que l'enfant déclenche, depuis le menu ou une notification.
+/// Ce que l'enfant déclenche, depuis le menu, une notification ou une fenêtre.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     AskTime(u32),
     AskService(String),
+    /// Une demande composée dans la fenêtre : cible, durée, mot pour les parents.
+    Ask {
+        target: GrantTarget,
+        minutes: Option<u32>,
+        message: Option<String>,
+    },
+    /// Ouvre la fenêtre de demande, ou l'espace enfant sans fenêtres.
+    AskMore,
     /// Ouvre l'espace enfant dans le navigateur.
     OpenSpace,
 }
 
 impl Command {
-    /// Clé d'action de notification, et retour.
+    /// Clé d'action de notification, et retour. Une demande composée ne
+    /// vient jamais d'une notification : sa clé ne se relit pas.
     pub fn key(&self) -> String {
         match self {
             Command::AskTime(m) => format!("time:{m}"),
             Command::AskService(id) => format!("service:{id}"),
+            Command::Ask { .. } => "ask".to_string(),
+            Command::AskMore => "more".to_string(),
             Command::OpenSpace => "open".to_string(),
         }
     }
 
     pub fn from_key(key: &str) -> Option<Self> {
-        if key == "open" {
-            return Some(Command::OpenSpace);
+        match key {
+            "open" => return Some(Command::OpenSpace),
+            "more" => return Some(Command::AskMore),
+            _ => {}
         }
         let (kind, value) = key.split_once(':')?;
         match kind {
@@ -86,6 +108,8 @@ struct App {
     cli: Cli,
     notifier: Notifier,
     tray: ksni::Handle<tray::Tray>,
+    /// Les fenêtres natives, quand GTK a pu démarrer.
+    ui: Option<ui::Ui>,
     state: Option<SessionState>,
     writer: Option<OwnedWriteHalf>,
     /// Le message d'accueil n'est montré qu'une fois par session.
@@ -103,6 +127,13 @@ impl App {
     }
 
     async fn apply(&mut self, state: Option<SessionState>) {
+        // L'écran de fermeture n'a plus lieu d'être dès que l'accès rouvre,
+        // ou qu'il n'y a plus rien à montrer.
+        if let Some(ui) = &self.ui
+            && state.as_ref().is_none_or(|s| s.access.open)
+        {
+            ui.dismiss_closed();
+        }
         self.state = state.clone();
         self.tray.update(|tray| tray.state = state).await;
     }
@@ -111,13 +142,24 @@ impl App {
         match event {
             AgentEvent::Unmanaged => self.apply(None).await,
             AgentEvent::State(state) => {
+                self.apply(Some(state.clone())).await;
                 if !self.welcomed {
                     self.welcomed = true;
                     self.welcome(&state).await;
                 }
-                self.apply(Some(state)).await;
             }
+            AgentEvent::Notice(notice @ Notice::Closed { .. }) => self.closed(&notice).await,
             AgentEvent::Notice(notice) => self.notifier.show(&notice, self.state.as_ref()).await,
+        }
+    }
+
+    /// Une fermeture : l'écran plein quand les fenêtres sont là, la
+    /// notification critique sinon.
+    async fn closed(&mut self, notice: &Notice) {
+        let may_ask = self.state.as_ref().is_some_and(|s| s.allow_requests);
+        match &self.ui {
+            Some(ui) => ui.show_closed(notice, may_ask),
+            None => self.notifier.show(notice, self.state.as_ref()).await,
         }
     }
 
@@ -139,30 +181,31 @@ impl App {
             quota_minutes: state.access.quota_today_minutes,
             grace_seconds: 0,
         };
-        self.notifier.show(&notice, Some(state)).await;
+        self.closed(&notice).await;
+    }
+
+    fn open_space(&self) {
+        let url = format!("http://{}/", self.cli.local_addr);
+        if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
+            tracing::warn!(error = %e, "ouverture de l'espace enfant");
+        }
     }
 
     async fn on_command(&mut self, command: Command) {
         let Some(state) = self.state.clone() else { return };
-        let (target, minutes, label) = match &command {
-            Command::OpenSpace => {
-                let url = format!("http://{}/", self.cli.local_addr);
-                if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
-                    tracing::warn!(error = %e, "ouverture de l'espace enfant");
-                }
-                return;
+        let (target, minutes, message) = match command {
+            Command::OpenSpace => return self.open_space(),
+            Command::AskMore => {
+                return match &self.ui {
+                    Some(ui) if state.allow_requests => ui.show_request(state),
+                    _ => self.open_space(),
+                };
             }
-            Command::AskTime(m) => {
-                (GrantTarget::ExtraMinutes { minutes: *m }, None, format!("{m} min de plus"))
-            }
+            Command::AskTime(m) => (GrantTarget::ExtraMinutes { minutes: m }, None, None),
             Command::AskService(id) => {
-                let label = state
-                    .requestable_services
-                    .iter()
-                    .find(|s| s.id == *id)
-                    .map_or_else(|| id.clone(), |s| s.label.clone());
-                (GrantTarget::Service { service: id.clone() }, Some(ASK_SERVICE_MINUTES), label)
+                (GrantTarget::Service { service: id }, Some(ASK_SERVICE_MINUTES), None)
             }
+            Command::Ask { target, minutes, message } => (target, minutes, message),
         };
         if !state.allow_requests || self.writer.is_none() {
             self.notifier
@@ -170,7 +213,8 @@ impl App {
                 .await;
             return;
         }
-        self.send(HelperMessage::Request { target, minutes, message: None }).await;
+        let label = text::request_label(&state, &target, minutes);
+        self.send(HelperMessage::Request { target, minutes, message }).await;
         let body = if state.server_connected {
             format!("Tes parents vont recevoir ta demande : {label}.")
         } else {
@@ -207,8 +251,9 @@ async fn main() -> Result<()> {
 
     let (commands_tx, mut commands) = mpsc::unbounded_channel();
     let notifier = Notifier::new(&bus, commands_tx.clone()).await?;
-    let tray = tray::spawn(commands_tx, cli.icon.clone(), cli.icon_dir.clone()).await?;
-    let mut app = App { cli, notifier, tray, state: None, writer: None, welcomed: false };
+    let tray = tray::spawn(commands_tx.clone(), cli.icon.clone(), cli.icon_dir.clone()).await?;
+    let ui = ui::Ui::start(commands_tx, cli.icon.clone(), cli.icon_dir.clone());
+    let mut app = App { cli, notifier, tray, ui, state: None, writer: None, welcomed: false };
     tracing::info!(socket = %app.cli.socket.display(), "assistant de session démarré");
 
     let mut delay = RETRY_MIN;
@@ -256,11 +301,15 @@ mod tests {
 
     #[test]
     fn commands_survive_their_action_key() {
-        for command in
-            [Command::AskTime(30), Command::AskService("youtube".into()), Command::OpenSpace]
-        {
+        for command in [
+            Command::AskTime(30),
+            Command::AskService("youtube".into()),
+            Command::AskMore,
+            Command::OpenSpace,
+        ] {
             assert_eq!(Command::from_key(&command.key()), Some(command));
         }
         assert_eq!(Command::from_key("default"), None);
+        assert_eq!(Command::from_key("ask"), None);
     }
 }
