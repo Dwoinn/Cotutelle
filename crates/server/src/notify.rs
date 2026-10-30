@@ -211,7 +211,7 @@ pub async fn set_server(state: &Shared, server: &str) -> Result<()> {
     Ok(())
 }
 
-/// Avant la version 0.3, les parents collaient l'adresse complète d'un
+/// Avant la version 0.2.2, les parents collaient l'adresse complète d'un
 /// sujet choisi par eux : on la reprend telle quelle pour ne pas les
 /// désabonner, et on lui ajoute le sujet des réponses.
 pub async fn migrate(state: &Shared) -> Result<()> {
