@@ -451,7 +451,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cotutelle-agent"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -473,7 +473,7 @@ dependencies = [
 
 [[package]]
 name = "cotutelle-common"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "serde",
@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "cotutelle-dns"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "cotutelle-common",
@@ -495,7 +495,7 @@ dependencies = [
 
 [[package]]
 name = "cotutelle-server"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -523,7 +523,7 @@ dependencies = [
 
 [[package]]
 name = "cotutelle-session"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "chrono",
