@@ -59,6 +59,26 @@ puis ouvrez `http://<adresse du serveur>:8080`, créez le compte parent,
 ajoutez un enfant, et installez l'agent sur son ordinateur avec le code
 affiché dans « Appareils ».
 
+### Télécharger
+
+Version 0.2.2 — toutes les versions et leurs sommes de contrôle sont sur la
+[page des versions](https://github.com/Dwoinn/cotutelle/releases).
+
+| Agent Linux | x86_64 | aarch64 |
+|-------------|--------|---------|
+| Debian, Ubuntu | [.deb](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent_0.2.2_amd64.deb) | [.deb](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent_0.2.2_arm64.deb) |
+| Fedora, RHEL, openSUSE | [.rpm](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent-0.2.2-1.x86_64.rpm) | [.rpm](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent-0.2.2-1.aarch64.rpm) |
+| Autres distributions | [.tar.gz](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent-0.2.2-linux-x86_64.tar.gz) | [.tar.gz](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent-0.2.2-linux-aarch64.tar.gz) |
+
+Les paquets demandent la glibc 2.28 ou plus récente (Debian 10, Ubuntu 20.04,
+RHEL 8). L'agent n'existe pas encore pour Windows ni macOS.
+
+Image du serveur, pour amd64 et arm64 :
+
+```bash
+docker pull ghcr.io/dwoinn/cotutelle-server:0.2.2
+```
+
 ## Développer
 
 Prérequis : Rust (la version est épinglée par `rust-toolchain.toml`),
