@@ -284,6 +284,7 @@ impl Runtime {
         }
         let requestable = filter.allow_requests
             && service.is_some_and(|s| filter.requestable_services.contains(&s.id));
+        tracing::info!(account, domain, ?reason, requestable, "site bloqué signalé à l'assistant");
         let notice = Notice::Blocked {
             domain,
             reason: reason.clone(),
