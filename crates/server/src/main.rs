@@ -134,10 +134,13 @@ async fn main() -> Result<()> {
         lan: Arc::new(lan::LanFilter::new(blocklists.clone())),
         blocklists,
         http: reqwest::Client::new(),
+        ntfy_changed: tokio::sync::Notify::new(),
     });
 
+    notify::migrate(&state).await.context("reprise du réglage ntfy")?;
     lan::rebuild(&state).await.context("chargement du filtrage LAN")?;
     tasks::spawn(state.clone());
+    tokio::spawn(notify::watch_replies(state.clone()));
 
     if let Some(dns_addr) = cli.dns_addr {
         let server = cotutelle_dns::DnsServer::bind(dns_addr, state.lan.clone()).await?;

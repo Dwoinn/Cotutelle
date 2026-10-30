@@ -6,6 +6,8 @@ use crate::state::Shared;
 use crate::{holidays, lan, notify, tasks};
 use axum::Json;
 use axum::extract::State;
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+use axum::response::{IntoResponse, Response};
 use chrono::NaiveDate;
 use cotutelle_common::{HolidayPeriod, catalog};
 use serde::Deserialize;
@@ -40,11 +42,29 @@ pub async fn catalog(_: Parent, State(state): State<Shared>) -> ApiResult<Value>
     })))
 }
 
+/// Réglages ntfy tels que l'interface les montre : jamais le secret ni le
+/// sujet des réponses.
+async fn ntfy_json(state: &Shared) -> Value {
+    let enabled = notify::enabled(state).await;
+    match notify::stored(state).await {
+        Some(ntfy) => json!({
+            "enabled": enabled,
+            "server": ntfy.server,
+            "topic": ntfy.topic,
+            "subscribe_url": ntfy.subscribe_url(),
+            "app_link": ntfy.app_link(),
+        }),
+        None => {
+            json!({ "enabled": false, "server": notify::DEFAULT_SERVER, "topic": null, "subscribe_url": null, "app_link": null })
+        }
+    }
+}
+
 pub async fn get(_: Parent, State(state): State<Shared>) -> ApiResult<Value> {
     let manifest = state.blocklists.manifest();
     let entries: u64 = manifest.categories.values().map(|e| e.entries).sum();
     Ok(Json(json!({
-        "ntfy_url": notify::setting(&state, "ntfy_url").await.unwrap_or_default(),
+        "ntfy": ntfy_json(&state).await,
         "upstream_dns": notify::setting(&state, "upstream_dns").await.unwrap_or_else(|| lan::DEFAULT_UPSTREAMS.to_string()),
         "retention_days": notify::setting(&state, "retention_days").await.and_then(|v| v.parse::<i64>().ok()).unwrap_or(30),
         "blocklists": {
@@ -59,17 +79,15 @@ pub async fn get(_: Parent, State(state): State<Shared>) -> ApiResult<Value> {
 
 #[derive(Deserialize)]
 pub struct SettingsInput {
-    ntfy_url: Option<String>,
+    ntfy_enabled: Option<bool>,
+    /// Serveur ntfy, pour qui en héberge un ; vide pour ntfy.sh.
+    ntfy_server: Option<String>,
     upstream_dns: Option<String>,
     retention_days: Option<i64>,
 }
 
 async fn save(state: &Shared, key: &str, value: &str) -> Result<(), ApiError> {
-    sqlx::query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
-        .bind(key)
-        .bind(value)
-        .execute(&state.db)
-        .await?;
+    notify::save_setting(state, key, value).await?;
     Ok(())
 }
 
@@ -78,14 +96,16 @@ pub async fn update(
     State(state): State<Shared>,
     Json(body): Json<SettingsInput>,
 ) -> ApiResult<Value> {
-    if let Some(url) = &body.ntfy_url {
-        let url = url.trim();
-        if !url.is_empty() && !url.starts_with("https://") && !url.starts_with("http://") {
-            return Err(ApiError::bad_request(
-                "l'adresse ntfy doit commencer par http:// ou https://",
-            ));
+    if let Some(server) = &body.ntfy_server {
+        let server = notify::clean_server(server).map_err(ApiError::bad_request)?;
+        notify::set_server(&state, &server).await?;
+    }
+    match body.ntfy_enabled {
+        Some(true) => {
+            notify::enable(&state).await?;
         }
-        save(&state, "ntfy_url", url).await?;
+        Some(false) => notify::disable(&state).await?,
+        None => {}
     }
     if let Some(upstreams) = &body.upstream_dns {
         if lan::parse_upstreams(upstreams).is_empty() {
@@ -103,6 +123,25 @@ pub async fn update(
     }
     state.changed().await;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Envoie une notification de test sur le téléphone des parents.
+pub async fn ntfy_test(_: Parent, State(state): State<Shared>) -> ApiResult<Value> {
+    notify::test(&state).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// Nouveaux sujets : à refaire suivre sur chaque téléphone.
+pub async fn ntfy_reset(_: Parent, State(state): State<Shared>) -> ApiResult<Value> {
+    notify::reset(&state).await?;
+    Ok(Json(ntfy_json(&state).await))
+}
+
+/// QR du lien d'abonnement, à scanner avec un téléphone Android.
+pub async fn ntfy_qr(_: Parent, State(state): State<Shared>) -> Result<Response, ApiError> {
+    let ntfy = notify::stored(&state).await.ok_or_else(|| ApiError::not_found("réglage ntfy"))?;
+    let svg = notify::qr_svg(&ntfy)?;
+    Ok(([(CONTENT_TYPE, "image/svg+xml"), (CACHE_CONTROL, "no-store")], svg).into_response())
 }
 
 /// Lance en arrière-plan le téléchargement des listes de blocage.

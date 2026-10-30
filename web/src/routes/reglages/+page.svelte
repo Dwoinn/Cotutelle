@@ -2,8 +2,10 @@
 	import { api } from '#lib/api.ts';
 	import { app, attempt, resetCatalog, toast } from '#lib/app.svelte.ts';
 	import About from '#lib/components/About.svelte';
+	import Switch from '#lib/components/Switch.svelte';
 	import { ago, longDate } from '#lib/format.ts';
-	import type { HolidayPeriod, HolidaySettings, Settings } from '#lib/types.ts';
+	import type { HolidayPeriod, HolidaySettings, NtfySettings, Settings } from '#lib/types.ts';
+	import Plus from '@lucide/svelte/icons/plus';
 	import { onMount } from 'svelte';
 
 	type ParentRow = { id: string; name: string; created_at: number };
@@ -16,11 +18,15 @@
 	let passwords = $state({ current: '', new: '' });
 	let refreshing = $state(false);
 	let removing = $state<string | null>(null);
+	let ntfyServer = $state('');
+	let testing = $state(false);
+	let resetting = $state(false);
 
 	const fmt = new Intl.NumberFormat('fr-FR');
 
 	async function load() {
 		settings = (await attempt(() => api.get<Settings>('/settings'))) ?? settings;
+		if (settings) ntfyServer = settings.ntfy.server;
 		holidays = (await attempt(() => api.get<HolidaySettings>('/holidays'))) ?? holidays;
 		parents = (await attempt(() => api.get<ParentRow[]>('/parents'))) ?? parents;
 	}
@@ -62,8 +68,36 @@
 
 	onMount(load);
 
-	async function save(fields: Partial<Settings>, message: string) {
+	async function save(fields: Record<string, unknown>, message: string) {
 		if (await attempt(() => api.put('/settings', fields), message)) load();
+	}
+
+	function toggleNotifications(enabled: boolean) {
+		save({ ntfy_enabled: enabled }, enabled ? 'Notifications activées' : 'Notifications désactivées');
+	}
+
+	async function copyTopic() {
+		if (!settings?.ntfy.topic) return;
+		try {
+			await navigator.clipboard.writeText(settings.ntfy.topic);
+			toast('Nom du sujet copié');
+		} catch {
+			toast('Copie impossible : sélectionnez le nom à la main', 'error');
+		}
+	}
+
+	async function testNotification() {
+		testing = true;
+		await attempt(() => api.post('/settings/ntfy/test'), 'Notification envoyée : regardez votre téléphone');
+		testing = false;
+	}
+
+	async function resetTopics() {
+		const fresh = await attempt(() => api.post<NtfySettings>('/settings/ntfy/reset'), 'Nouveau sujet : abonnez à nouveau chaque téléphone');
+		if (fresh && settings) {
+			settings.ntfy = fresh;
+			resetting = false;
+		}
 	}
 
 	async function refreshLists() {
@@ -129,23 +163,97 @@
 
 		<section class="panel">
 			<h2>Notifications sur téléphone</h2>
-			<p class="muted mt-1 mb-4 text-[0.95rem]">
-				Recevez les demandes des enfants et les alertes avec l'application gratuite
-				<a class="underline underline-offset-2" href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a>. Choisissez
-				un nom de sujet difficile à deviner, abonnez-vous-y dans l'application, puis collez son adresse ici.
+			<p class="muted mt-1 mb-3 text-[0.95rem]">
+				Recevez les demandes des enfants et les alertes, et répondez-y d'un geste depuis la notification, même
+				hors de la maison. Les notifications passent par l'application gratuite
+				<a class="underline underline-offset-2" href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a>,
+				sans compte ni réglage : Cotutelle choisit lui-même un canal secret.
 			</p>
-			<form
-				class="space-y-2"
-				onsubmit={(e) => {
-					e.preventDefault();
-					save({ ntfy_url: settings!.ntfy_url }, 'Notifications enregistrées');
-				}}
-			>
-				<label class="label" for="ntfy">Adresse du sujet</label>
-				<input id="ntfy" class="field" bind:value={settings.ntfy_url} placeholder="https://ntfy.sh/famille-x7k2m9q4" inputmode="url" autocapitalize="off" />
-				<p class="hint">Laissez vide pour désactiver. Le texte des notifications passe par le serveur ntfy indiqué.</p>
-				<button class="btn-primary">Enregistrer</button>
-			</form>
+			<div class="rows">
+				<Switch
+					checked={settings.ntfy.enabled}
+					label="Notifications activées"
+					description={settings.ntfy.enabled ? 'Les téléphones abonnés reçoivent les demandes et les alertes.' : 'Rien ne part du serveur.'}
+					onchange={toggleNotifications}
+				/>
+			</div>
+			{#if settings.ntfy.enabled && settings.ntfy.topic}
+				<ol class="mt-4 space-y-4 text-[0.95rem]">
+					<li class="flex gap-3">
+						<span class="tag-quiet shrink-0">1</span>
+						<span>
+							Installez ntfy sur chaque téléphone de parent :
+							<a class="underline underline-offset-2" href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener">Play Store</a>,
+							<a class="underline underline-offset-2" href="https://f-droid.org/packages/io.heckel.ntfy/" target="_blank" rel="noopener">F-Droid</a>
+							ou
+							<a class="underline underline-offset-2" href="https://apps.apple.com/app/ntfy/id1625396347" target="_blank" rel="noopener">App Store</a>.
+						</span>
+					</li>
+					<li class="flex gap-3">
+						<span class="tag-quiet shrink-0">2</span>
+						<span class="min-w-0 space-y-2">
+							<span class="block">Abonnez ce téléphone au canal de la famille.</span>
+							<a class="btn-primary" href={settings.ntfy.app_link}>Ouvrir dans ntfy</a>
+							<span class="muted block text-sm">
+								Sur iPhone, ce bouton ne suffit pas : dans ntfy, touchez <strong class="text-ink">+</strong> et saisissez ce sujet{#if settings.ntfy.server !== 'https://ntfy.sh'}, sur le serveur
+									<code class="bg-sunken rounded-md px-1.5 py-0.5 text-[0.9em] break-all">{settings.ntfy.server}</code>{/if} :
+							</span>
+							<span class="flex items-center gap-2">
+								<code class="bg-sunken rounded-md px-2 py-1 text-[0.9em] break-all">{settings.ntfy.topic}</code>
+								<button type="button" class="btn-ghost btn-sm shrink-0" onclick={copyTopic}>Copier</button>
+							</span>
+						</span>
+					</li>
+					<li class="flex gap-3">
+						<span class="tag-quiet shrink-0">3</span>
+						<span>
+							<button type="button" class="btn-quiet" disabled={testing} onclick={testNotification}>
+								{testing ? 'Envoi…' : 'Envoyer une notification de test'}
+							</button>
+						</span>
+					</li>
+				</ol>
+				<details class="group mt-5">
+					<summary class="flex list-none items-center gap-2 font-semibold [&::-webkit-details-marker]:hidden">
+						<Plus size={18} class="text-muted transition-transform group-open:rotate-45" />
+						Depuis un ordinateur, ou pour aller plus loin
+					</summary>
+					<div class="mt-3 space-y-5">
+						<div class="flex flex-wrap items-start gap-4">
+							<img class="h-40 w-40 shrink-0 rounded-2xl bg-white p-2" src="/api/v1/settings/ntfy/qr.svg" alt="QR code du canal de la famille" />
+							<p class="muted min-w-48 flex-1 text-sm">
+								Scannez ce code avec l'appareil photo d'un téléphone Android : il s'ouvre dans ntfy et s'abonne au canal.
+							</p>
+						</div>
+						<form
+							class="space-y-2"
+							onsubmit={(e) => {
+								e.preventDefault();
+								save({ ntfy_server: ntfyServer }, 'Serveur ntfy enregistré');
+							}}
+						>
+							<label class="label" for="ntfy-server">Serveur ntfy</label>
+							<div class="flex gap-2">
+								<input id="ntfy-server" class="field" bind:value={ntfyServer} placeholder="https://ntfy.sh" inputmode="url" autocapitalize="off" />
+								<button class="btn-quiet shrink-0">Enregistrer</button>
+							</div>
+							<p class="hint">Si vous hébergez votre propre serveur ntfy. Sur iPhone, un serveur personnel ne notifie que s'il relaie par ntfy.sh.</p>
+						</form>
+						<div>
+							{#if resetting}
+								<p class="mb-2 text-sm">Les téléphones abonnés ne recevront plus rien tant qu'ils ne suivent pas le nouveau canal.</p>
+								<span class="flex gap-2">
+									<button type="button" class="btn-danger btn-sm" onclick={resetTopics}>Changer de canal</button>
+									<button type="button" class="btn-quiet btn-sm" onclick={() => (resetting = false)}>Annuler</button>
+								</span>
+							{:else}
+								<button type="button" class="btn-ghost btn-sm text-muted" onclick={() => (resetting = true)}>Changer de canal</button>
+								<p class="hint">Si le nom du canal a été partagé par erreur.</p>
+							{/if}
+						</div>
+					</div>
+				</details>
+			{/if}
 		</section>
 
 		<section class="panel">

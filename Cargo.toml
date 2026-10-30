@@ -42,7 +42,10 @@ hickory-proto = { version = "0.25", default-features = false, features = ["std"]
 argon2 = "0.5"
 rand = "0.8"
 sha2 = "0.10"
+hmac = "0.12"
 hex = "0.4"
+# QR d'abonnement ntfy, rendu en SVG
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 # Client HTTP et WebSocket (agent, téléchargement des listes)
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "cookies"] }

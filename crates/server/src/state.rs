@@ -19,6 +19,8 @@ pub struct AppState {
     pub blocklists: Arc<BlocklistStore>,
     pub lan: Arc<LanFilter>,
     pub http: reqwest::Client,
+    /// Réveille le suivi des réponses ntfy quand ses réglages changent.
+    pub ntfy_changed: tokio::sync::Notify,
 }
 
 pub type Shared = Arc<AppState>;

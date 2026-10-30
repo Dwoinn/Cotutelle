@@ -83,7 +83,7 @@ plusieurs : deux parents, plusieurs enfants, plusieurs appareils.
 | D10 | **SQLite par défaut**, Postgres en option. | Zéro administration pour une famille. |
 | D11 | **Demande d'accès depuis l'appareil de l'enfant**, validation par le parent avec notification. | Transforme la friction du cas YouTube en fonctionnalité. |
 | D12 | **Sur un appareil avec agent, la politique appliquée est celle du compte au premier plan.** Un compte non rattaché à un enfant n'est pas filtré. | Le résolveur local ne connaît pas l'auteur d'une requête DNS : systemd-resolved les relaie toutes sous sa propre identité. |
-| D13 | **Notifications aux parents par ntfy**, optionnelles. | Web Push exige HTTPS, incompatible avec un accès en HTTP sur le réseau local. |
+| D13 | **Notifications aux parents par ntfy**, optionnelles, **dans les deux sens**. Le serveur tire lui-même deux sujets secrets : l'un porte ses notifications, que les téléphones suivent ; l'autre porte les réponses des parents, qu'il suit par une connexion sortante. Les boutons « Accorder » et « Refuser » d'une demande envoient sur ce second sujet un jeton signé (HMAC), lié à la demande et à la décision, valable un jour ; une demande ne se tranche qu'une fois. | Web Push exige HTTPS, incompatible avec un accès en HTTP sur le réseau local. Le relais par ntfy ne demande aucun port ouvert : un serveur réservé au réseau local reçoit quand même la réponse d'un parent hors de la maison. Les parents n'ont rien à saisir : l'appli ntfy et un lien d'abonnement suffisent. Web Push dans la PWA, avec ntfy en relais invisible des réponses, reste la suite naturelle dès que le serveur est servi en HTTPS. |
 | D14 | **Le serveur envoie toujours l'état complet à l'agent**, jamais de delta. | La copie sur disque de l'agent est directement la dernière politique connue (D3). |
 | D15 | **Licence AGPL-3.0-or-later avec clause d'attribution** (article 7(b)) ; le nom Cotutelle est réservé au projet officiel. Pas de cession de droits des contributeurs, attestation d'origine seulement. | L'objectif est de protéger la paternité, pas un revenu : chacun peut réutiliser et même vendre, à condition de publier son code et de citer le projet. |
 | D16 | **L'agent relaie d'abord vers les DNS annoncés par le réseau**, puis vers les résolveurs configurés. Une réponse négative d'un amont fait essayer le suivant. | Seuls les DNS du réseau connaissent les noms privés : serveur Cotutelle interne, NAS, portail captif. Le filtrage ayant lieu avant le relais, ce choix ne l'affaiblit pas. |
@@ -265,7 +265,8 @@ par assistant, exceptions rapides (« +30 min », « YouTube 1 h »), journal.
 », ce que mes parents voient, accessible depuis l'appareil sans mot de passe.
 Les services « sur demande » s'y choisissent par leur logo.
 
-**Notifications parents** : ntfy, optionnel (D13).
+**Notifications parents** : ntfy, optionnel, avec réponse depuis la
+notification (D13).
 
 **Langue** : français d'abord, interface prête pour l'i18n.
 

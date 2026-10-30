@@ -217,10 +217,34 @@ journalisation.
 
 ## 4. Notifications sur téléphone
 
-Dans **Réglages › Notifications**, collez l'adresse d'un sujet
-[ntfy](https://ntfy.sh), par exemple `https://ntfy.sh/famille-x7k2m9q4`, et
-abonnez-vous à ce sujet dans l'application ntfy. Le nom du sujet tient lieu de
-mot de passe : choisissez-le long et aléatoire. ntfy peut aussi s'auto-héberger.
+Les parents reçoivent les demandes des enfants et les alertes sur leur
+téléphone, et répondent à une demande d'un geste depuis la notification,
+même hors de la maison : le serveur n'a pas besoin d'être joignable depuis
+Internet.
+
+1. Dans **Réglages › Notifications sur téléphone**, activez les
+   notifications. Le serveur choisit lui-même un canal secret sur
+   [ntfy](https://ntfy.sh), un service libre et gratuit, sans compte.
+2. Installez l'application ntfy sur chaque téléphone de parent (Play Store,
+   F-Droid ou App Store).
+3. Depuis la page des réglages ouverte sur le téléphone, touchez
+   **Ouvrir dans ntfy** : sur Android, l'application s'abonne au canal. Sur
+   iPhone, ouvrez ntfy, touchez **+** et collez le nom du canal, à copier
+   depuis la même page. Depuis un ordinateur, un QR code à scanner avec un
+   téléphone Android attend sous « Depuis un ordinateur ».
+4. Envoyez une notification de test.
+
+Une demande d'enfant arrive avec deux boutons, **Accorder** et **Refuser**.
+La réponse repasse par ntfy jusqu'au serveur, qui l'applique et renvoie un
+compte rendu sur le téléphone ; l'enfant la voit aussitôt sur son appareil.
+Chaque bouton porte un jeton signé par le serveur, valable un jour et pour
+une seule demande : rejouer une réponse ne fait rien.
+
+Le nom du canal tient lieu de mot de passe : ne le partagez pas. S'il a fuité,
+**Changer de canal** en tire un nouveau, à refaire suivre sur chaque
+téléphone. Qui héberge son propre serveur ntfy indique son adresse au même
+endroit ; sur iPhone, un serveur personnel ne notifie que s'il relaie par
+ntfy.sh (réglage `upstream-base-url` de ntfy).
 
 ## 5. Vacances scolaires
 

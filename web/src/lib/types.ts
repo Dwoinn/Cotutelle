@@ -205,8 +205,18 @@ export type ChildSpace = {
 	now: number;
 };
 
+export type NtfySettings = {
+	enabled: boolean;
+	server: string;
+	/** Nul tant que les notifications n'ont jamais été activées. */
+	topic: string | null;
+	subscribe_url: string | null;
+	/** Lien `ntfy://` : l'application Android s'y abonne d'un geste. */
+	app_link: string | null;
+};
+
 export type Settings = {
-	ntfy_url: string;
+	ntfy: NtfySettings;
 	upstream_dns: string;
 	retention_days: number;
 	blocklists: { updated_at: number; source: string; categories: number; entries: number };

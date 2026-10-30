@@ -4,7 +4,7 @@ mod agent;
 pub mod child;
 mod children;
 mod devices;
-mod grants;
+pub mod grants;
 mod overview;
 mod parents;
 mod services;
@@ -57,6 +57,9 @@ pub fn router() -> Router<Shared> {
         .route("/services/{id}", put(services::update).delete(services::remove))
         .route("/services/{id}/logo", get(services::logo))
         .route("/settings", get(settings::get).put(settings::update))
+        .route("/settings/ntfy/test", post(settings::ntfy_test))
+        .route("/settings/ntfy/reset", post(settings::ntfy_reset))
+        .route("/settings/ntfy/qr.svg", get(settings::ntfy_qr))
         .route("/blocklists/refresh", post(settings::refresh_blocklists))
         .route("/holidays", get(settings::holidays).put(settings::update_holidays))
         // Espace enfant

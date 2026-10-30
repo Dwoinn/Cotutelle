@@ -16,6 +16,7 @@ use axum::http::header::{LOCATION, SET_COOKIE};
 use axum::response::{IntoResponse, Response};
 use chrono::{Datelike, Local};
 use cotutelle_common::GrantTarget;
+use cotutelle_common::session::minutes_label;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -213,7 +214,14 @@ pub async fn create_request(
     if let Some(message) = &message {
         text.push_str(&format!(" : « {message} »"));
     }
-    notify::push(state, "Cotutelle : nouvelle demande", &text).await;
+    let approve_label = match (&target, minutes) {
+        (GrantTarget::ExtraMinutes { minutes }, _) => {
+            format!("Accorder {}", minutes_label(*minutes))
+        }
+        (_, Some(m)) => format!("Accorder {}", minutes_label(m)),
+        (_, None) => "Accorder".to_string(),
+    };
+    notify::push_request(state, &id, &text, &approve_label).await;
     Ok(Ok(id))
 }
 

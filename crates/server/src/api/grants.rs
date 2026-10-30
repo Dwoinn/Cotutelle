@@ -5,9 +5,11 @@ use crate::auth::Parent;
 use crate::error::{ApiError, ApiResult};
 use crate::model::{self, Grant};
 use crate::state::Shared;
-use crate::util;
+use crate::{notify, util};
+use anyhow::Result;
 use axum::Json;
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use cotutelle_common::protocol::ServerMessage;
 use cotutelle_common::{GrantTarget, Service, clean_domain, service_for_domain};
 use serde::Deserialize;
@@ -61,7 +63,7 @@ pub async fn insert_grant(
     device_id: Option<&str>,
     target: &GrantTarget,
     minutes: Option<u32>,
-    parent_id: &str,
+    parent_id: Option<&str>,
 ) -> Result<(String, i64), ApiError> {
     let now = util::now();
     let expires_at = match target {
@@ -111,7 +113,7 @@ pub async fn create(
         body.device_id.as_deref(),
         &target,
         body.minutes,
-        &parent.id,
+        Some(&parent.id),
     )
     .await?;
     state.changed().await;
@@ -219,7 +221,12 @@ async fn take_pending(
     Ok((child_id, serde_json::from_str(&target)?, minutes))
 }
 
-async fn resolve(state: &Shared, id: &str, status: &str, parent_id: &str) -> Result<(), ApiError> {
+async fn resolve(
+    state: &Shared,
+    id: &str,
+    status: &str,
+    parent_id: Option<&str>,
+) -> Result<(), ApiError> {
     sqlx::query("UPDATE requests SET status = ?, resolved_at = ?, resolved_by = ? WHERE id = ?")
         .bind(status)
         .bind(util::now())
@@ -247,31 +254,87 @@ async fn answer_device(state: &Shared, request_id: &str, approved: bool, text: S
     }
 }
 
+/// Qui tranche une demande : un parent connecté, ou un parent depuis la
+/// notification de son téléphone, que le serveur ne sait pas nommer.
+pub struct Decider {
+    id: Option<String>,
+    name: String,
+}
+
+impl From<&Parent> for Decider {
+    fn from(parent: &Parent) -> Self {
+        Decider { id: Some(parent.id.clone()), name: parent.name.clone() }
+    }
+}
+
+impl Decider {
+    fn phone() -> Self {
+        Decider { id: None, name: "Un parent".to_string() }
+    }
+}
+
+/// Une demande tranchée, de quoi en rendre compte.
+pub struct Answered {
+    pub child_name: String,
+    pub what: String,
+    pub minutes: Option<u32>,
+    /// Exception créée, avec son expiration ; rien pour un refus.
+    pub grant: Option<(String, i64)>,
+}
+
+async fn child_name(state: &Shared, child_id: &str) -> String {
+    model::child(&state.db, child_id).await.ok().flatten().map(|c| c.name).unwrap_or_default()
+}
+
+/// Accorde une demande en attente ; `minutes` remplace la durée demandée.
+pub async fn approve_request(
+    state: &Shared,
+    id: &str,
+    minutes: Option<u32>,
+    who: &Decider,
+) -> Result<Answered, ApiError> {
+    let (child_id, mut target, requested) = take_pending(state, id).await?;
+    let minutes = minutes.or(requested.map(|m| m as u32));
+    // Pour du temps bonus, la durée accordée remplace la durée demandée.
+    if let (GrantTarget::ExtraMinutes { minutes: asked }, Some(granted)) = (&mut target, minutes) {
+        *asked = granted.clamp(1, 600);
+    }
+    replace_same(state, Some(&child_id), None, &target).await?;
+    let grant =
+        insert_grant(state, Some(&child_id), None, &target, minutes, who.id.as_deref()).await?;
+    resolve(state, id, "approved", who.id.as_deref()).await?;
+    let services = model::services(&state.db).await?;
+    let what = describe_target(&services, &target);
+    let text = match (&target, minutes) {
+        (GrantTarget::ExtraMinutes { .. }, _) => format!("{} t'a accordé {what}.", who.name),
+        (_, Some(m)) => format!("{} a accordé {what} pendant {}.", who.name, minutes_label(m)),
+        (_, None) => format!("{} a accordé {what}.", who.name),
+    };
+    answer_device(state, id, true, text).await;
+    state.changed().await;
+    let child_name = child_name(state, &child_id).await;
+    Ok(Answered { child_name, what, minutes, grant: Some(grant) })
+}
+
+pub async fn deny_request(state: &Shared, id: &str, who: &Decider) -> Result<Answered, ApiError> {
+    let (child_id, target, _) = take_pending(state, id).await?;
+    resolve(state, id, "denied", who.id.as_deref()).await?;
+    let services = model::services(&state.db).await?;
+    let what = describe_target(&services, &target);
+    answer_device(state, id, false, format!("{} n'a pas accordé {what}.", who.name)).await;
+    let child_name = child_name(state, &child_id).await;
+    Ok(Answered { child_name, what, minutes: None, grant: None })
+}
+
 pub async fn approve(
     parent: Parent,
     State(state): State<Shared>,
     Path(id): Path<String>,
     body: Option<Json<ApproveInput>>,
 ) -> ApiResult<Value> {
-    let (child_id, mut target, requested) = take_pending(&state, &id).await?;
-    let minutes = body.and_then(|b| b.minutes).or(requested.map(|m| m as u32));
-    // Pour du temps bonus, la durée accordée remplace la durée demandée.
-    if let (GrantTarget::ExtraMinutes { minutes: asked }, Some(granted)) = (&mut target, minutes) {
-        *asked = granted.clamp(1, 600);
-    }
-    replace_same(&state, Some(&child_id), None, &target).await?;
-    let (grant_id, expires_at) =
-        insert_grant(&state, Some(&child_id), None, &target, minutes, &parent.id).await?;
-    resolve(&state, &id, "approved", &parent.id).await?;
-    let services = model::services(&state.db).await?;
-    let what = describe_target(&services, &target);
-    let text = match (&target, minutes) {
-        (GrantTarget::ExtraMinutes { .. }, _) => format!("{} t'a accordé {what}.", parent.name),
-        (_, Some(m)) => format!("{} a accordé {what} pendant {}.", parent.name, minutes_label(m)),
-        (_, None) => format!("{} a accordé {what}.", parent.name),
-    };
-    answer_device(&state, &id, true, text).await;
-    state.changed().await;
+    let minutes = body.and_then(|b| b.minutes);
+    let answered = approve_request(&state, &id, minutes, &Decider::from(&parent)).await?;
+    let (grant_id, expires_at) = answered.grant.unwrap_or_default();
     Ok(Json(json!({ "grant_id": grant_id, "expires_at": expires_at })))
 }
 
@@ -280,12 +343,30 @@ pub async fn deny(
     State(state): State<Shared>,
     Path(id): Path<String>,
 ) -> ApiResult<Value> {
-    let (_, target, _) = take_pending(&state, &id).await?;
-    resolve(&state, &id, "denied", &parent.id).await?;
-    let services = model::services(&state.db).await?;
-    let what = describe_target(&services, &target);
-    answer_device(&state, &id, false, format!("{} n'a pas accordé {what}.", parent.name)).await;
+    deny_request(&state, &id, &Decider::from(&parent)).await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Applique la réponse d'un parent depuis la notification de son téléphone.
+/// Rend le compte rendu à lui renvoyer, ou rien si la demande n'était plus
+/// en attente.
+pub async fn answer_from_phone(state: &Shared, reply: &notify::Reply) -> Result<Option<String>> {
+    let who = Decider::phone();
+    let outcome = match reply.decision {
+        notify::Decision::Approve => approve_request(state, &reply.request_id, None, &who).await,
+        notify::Decision::Deny => deny_request(state, &reply.request_id, &who).await,
+    };
+    let answered = match outcome {
+        Ok(answered) => answered,
+        Err(e) if e.status() == StatusCode::NOT_FOUND => return Ok(None),
+        Err(e) => return Err(anyhow::anyhow!("{}", e.message())),
+    };
+    let Answered { child_name, what, minutes, grant } = answered;
+    Ok(Some(match (grant.is_some(), minutes) {
+        (true, Some(m)) => format!("Accordé à {child_name} : {what} pendant {}.", minutes_label(m)),
+        (true, None) => format!("Accordé à {child_name} : {what}."),
+        (false, _) => format!("Refusé à {child_name} : {what}."),
+    }))
 }
 
 /// Texte d'une demande pour la notification aux parents.
