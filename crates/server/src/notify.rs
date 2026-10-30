@@ -226,7 +226,7 @@ pub async fn migrate(state: &Shared) -> Result<()> {
         save_setting(state, "ntfy_reply_topic", &random_topic()).await?;
         save_setting(state, "ntfy_secret", &util::new_token()).await?;
         save_setting(state, "ntfy_enabled", "1").await?;
-        tracing::info!(topic, "sujet ntfy repris de l'ancien réglage");
+        tracing::info!("sujet ntfy repris de l'ancien réglage");
     }
     sqlx::query("DELETE FROM settings WHERE key = 'ntfy_url'").execute(&state.db).await?;
     Ok(())
@@ -385,8 +385,15 @@ pub async fn watch_replies(state: Shared) {
 
 async fn follow(state: &Shared, ntfy: &Ntfy, since: &mut String) -> Result<()> {
     let url = format!("{}/json?since={since}", ntfy.reply_url());
-    let response = state.http.get(&url).send().await?.error_for_status()?;
-    tracing::info!(topic = %ntfy.reply_topic, "réponses ntfy suivies");
+    // Une erreur reqwest cite l'adresse, donc le sujet : on l'en prive.
+    let response = state
+        .http
+        .get(&url)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(reqwest::Error::without_url)?;
+    tracing::info!("réponses ntfy suivies");
     let mut stream = response.bytes_stream();
     let mut buffer: Vec<u8> = Vec::new();
     loop {
