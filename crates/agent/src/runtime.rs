@@ -21,7 +21,9 @@ use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-const DEFAULT_UPSTREAMS: &[&str] = &["9.9.9.9:53", "149.112.112.112:53"];
+/// Secours quand l'état ne fournit aucun résolveur : DNS4EU « Protective »,
+/// comme le serveur.
+const DEFAULT_UPSTREAMS: &[&str] = &["86.54.11.1:53", "86.54.11.201:53"];
 /// Un site bloqué n'est signalé qu'une fois par quart d'heure : une page en
 /// sollicite des dizaines de fois.
 const BLOCKED_NOTICE_EVERY: Duration = Duration::from_secs(15 * 60);

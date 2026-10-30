@@ -15,7 +15,10 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use crate::blocklists::BlocklistStore;
 
-pub const DEFAULT_UPSTREAMS: &str = "9.9.9.9:53, 149.112.112.112:53";
+/// Résolveurs amont par défaut : DNS4EU, profil « Protective » (hameçonnage
+/// et logiciels malveillants écartés). Quad9 cesse de servir la France le
+/// 24 novembre 2026.
+pub const DEFAULT_UPSTREAMS: &str = "86.54.11.1:53, 86.54.11.201:53";
 
 #[derive(Debug, Clone)]
 struct Profile {

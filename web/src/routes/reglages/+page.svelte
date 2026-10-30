@@ -160,7 +160,7 @@
 				<div>
 					<label class="label" for="dns">Résolveurs DNS de secours</label>
 					<input id="dns" class="field tabular-nums" bind:value={settings.upstream_dns} autocapitalize="off" />
-					<p class="hint">Séparés par des virgules. Par défaut Quad9, qui écarte aussi les sites malveillants.</p>
+					<p class="hint">Séparés par des virgules. Par défaut DNS4EU (86.54.11.1), résolveur public européen qui écarte aussi les sites malveillants ; sa variante 86.54.11.12 filtre en plus les contenus pour adultes sur tous les appareils.</p>
 				</div>
 				<div>
 					<label class="label" for="retention">Conserver l'activité pendant</label>

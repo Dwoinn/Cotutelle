@@ -90,7 +90,7 @@ pub async fn update(
     if let Some(upstreams) = &body.upstream_dns {
         if lan::parse_upstreams(upstreams).is_empty() {
             return Err(ApiError::bad_request(
-                "aucun résolveur DNS valide (format : 9.9.9.9 ou 9.9.9.9:53)",
+                "aucun résolveur DNS valide (format : 86.54.11.1 ou 86.54.11.1:53)",
             ));
         }
         save(&state, "upstream_dns", upstreams.trim()).await?;
