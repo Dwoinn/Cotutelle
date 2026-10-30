@@ -219,7 +219,8 @@ pub const SERVICES: &[BuiltinService] = &[
     svc(
         "minecraft",
         "Minecraft en ligne",
-        &["minecraft.net", "minecraftservices.com", "mojang.com"],
+        // La connexion au compte Microsoft passe par Xbox Live.
+        &["minecraft.net", "minecraftservices.com", "mojang.com", "xboxlive.com"],
     ),
     svc(
         "netflix",

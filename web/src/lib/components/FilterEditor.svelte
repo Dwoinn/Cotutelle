@@ -27,7 +27,7 @@
 	const KEY = $derived(
 		(
 			[
-				{ mode: 'open', term: 'Autorisé', meaning: 'le service n’est pas bloqué.' },
+				{ mode: 'open', term: 'Autorisé', meaning: 'le service passe, même si une catégorie bloquée le contient.' },
 				{ mode: 'ask', term: 'Sur demande', meaning: `bloqué, mais ${childName} peut vous demander de l’ouvrir.` },
 				{
 					mode: 'blocked',

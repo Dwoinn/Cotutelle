@@ -263,7 +263,15 @@ pub fn evaluate(domain: &str, ctx: &FilterContext<'_>) -> Verdict {
                 return Verdict::Block(BlockReason::Service(service.clone()));
             }
         }
-        for category in &ctx.policy.blocked_categories {
+        // Un service du catalogue laissé « Autorisé » est un choix explicite
+        // des parents : il passe même si une catégorie bloquée le contient
+        // (Minecraft avec « Jeux en ligne »). La liste noire, plus précise,
+        // garde le dernier mot ci-dessus.
+        let service_allowed = ctx
+            .services
+            .iter()
+            .any(|s| !ctx.policy.blocked_services.contains(&s.id) && s.matches(domain));
+        for category in ctx.policy.blocked_categories.iter().filter(|_| !service_allowed) {
             let lifted = active
                 .iter()
                 .any(|t| matches!(t, GrantTarget::Category { category: c } if c == category));
@@ -351,6 +359,51 @@ mod tests {
             label: id.into(),
             domains: domains.iter().map(|d| d.to_string()).collect(),
         }
+    }
+
+    #[test]
+    fn allowed_service_beats_categories_but_not_deny_list() {
+        let now = Utc::now();
+        let services = [service("minecraft", &["mojang.com"])];
+        let mut lists = Blocklists::default();
+        lists.insert("games", DomainSet::from_text("mojang.com\nroblox.com\n"));
+        let ctx = |policy: &FilterPolicy| {
+            evaluate(
+                "sessionserver.mojang.com",
+                &FilterContext {
+                    policy,
+                    grants: &[],
+                    blocklists: &lists,
+                    services: &services,
+                    now,
+                    access_open: true,
+                },
+            )
+        };
+        let games_blocked =
+            FilterPolicy { blocked_categories: ["games".to_string()].into(), ..Default::default() };
+        assert_eq!(ctx(&games_blocked), Verdict::Allow, "service autorisé malgré la catégorie");
+        let blocked = FilterPolicy {
+            blocked_services: ["minecraft".to_string()].into(),
+            ..games_blocked.clone()
+        };
+        assert_eq!(ctx(&blocked), Verdict::Block(BlockReason::Service("minecraft".into())));
+        let denied =
+            FilterPolicy { deny: ["mojang.com".to_string()].into(), ..games_blocked.clone() };
+        assert_eq!(ctx(&denied), Verdict::Block(BlockReason::DenyList));
+        // Un site hors catalogue reste soumis à la catégorie.
+        let roblox = evaluate(
+            "www.roblox.com",
+            &FilterContext {
+                policy: &games_blocked,
+                grants: &[],
+                blocklists: &lists,
+                services: &services,
+                now,
+                access_open: true,
+            },
+        );
+        assert_eq!(roblox, Verdict::Block(BlockReason::Category("games".into())));
     }
 
     #[test]
