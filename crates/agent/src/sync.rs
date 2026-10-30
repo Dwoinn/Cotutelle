@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail};
 use chrono::Local;
 use cotutelle_common::PROTOCOL_VERSION;
 use cotutelle_common::protocol::{AgentMessage, DeviceState, ServerMessage};
+use cotutelle_common::session::Notice;
 use futures_util::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -79,6 +80,13 @@ async fn session(rt: &Arc<Runtime>) -> Result<()> {
                     Message::Text(text) => match serde_json::from_str::<ServerMessage>(text.as_str()) {
                         Ok(ServerMessage::State(state)) => apply_state(rt, *state).await,
                         Ok(ServerMessage::LockNow { os_account }) => crate::watch::lock_account(rt, &os_account),
+                        Ok(ServerMessage::RequestAnswered { os_account, approved, text }) => {
+                            let rt = rt.clone();
+                            // Sans assistant, la notification passe par le bureau : hors du fil asynchrone.
+                            tokio::task::spawn_blocking(move || {
+                                crate::watch::inform_account(&rt, &os_account, Notice::Answered { approved, text })
+                            });
+                        }
                         Ok(ServerMessage::Pong) => awaiting_pong = false,
                         Err(e) => tracing::warn!(error = %e, "message du serveur illisible"),
                     },

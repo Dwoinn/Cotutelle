@@ -26,6 +26,10 @@ impl Platform for Unsupported {
         Vec::new()
     }
 
+    fn account_name(&self, _uid: u32) -> Option<String> {
+        None
+    }
+
     fn sessions(&self) -> Result<Vec<Session>> {
         Ok(Vec::new())
     }

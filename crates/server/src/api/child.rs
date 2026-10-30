@@ -8,6 +8,7 @@ use crate::auth::{self, ChildSession, Parent};
 use crate::error::{ApiError, ApiResult};
 use crate::state::Shared;
 use crate::{holidays, logos, model, notify, util};
+use anyhow::Context;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -133,35 +134,57 @@ pub struct RequestInput {
     message: Option<String>,
 }
 
-pub async fn request(
-    session: ChildSession,
-    State(state): State<Shared>,
-    Json(body): Json<RequestInput>,
-) -> ApiResult<Value> {
-    let child = model::child(&state.db, &session.child_id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("enfant"))?;
-    let holidays = holidays::periods(&state).await;
-    if !model::rules_today(&child.policy, &holidays).filter.allow_requests {
-        return Err(ApiError::new(StatusCode::FORBIDDEN, "les demandes ne sont pas activées"));
+/// Pourquoi une demande n'est pas enregistrée.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    NotAllowed,
+    Unsupported,
+    TooMany,
+}
+
+impl Refusal {
+    /// Phrase pour l'enfant.
+    pub fn text(self) -> &'static str {
+        match self {
+            Refusal::NotAllowed => "Les demandes ne sont pas activées pour toi.",
+            Refusal::Unsupported => "Cette demande n'est pas possible.",
+            Refusal::TooMany => {
+                "Tu as déjà plusieurs demandes en attente : attends la réponse de tes parents."
+            }
+        }
     }
-    // Un enfant peut demander un service, un site ou du temps : rien d'autre.
+}
+
+/// Enregistre une demande de l'enfant et prévient les parents. Même règle
+/// quelle que soit l'origine, espace web ou bureau de l'enfant (D11) : un
+/// service, un site ou du temps, si ses parents ont activé les demandes.
+pub async fn create_request(
+    state: &Shared,
+    child_id: &str,
+    device_id: Option<&str>,
+    target: GrantTarget,
+    minutes: Option<u32>,
+    message: Option<String>,
+) -> anyhow::Result<Result<String, Refusal>> {
+    let child = model::child(&state.db, child_id).await?.context("enfant introuvable")?;
+    let holidays = holidays::periods(state).await;
+    if !model::rules_today(&child.policy, &holidays).filter.allow_requests {
+        return Ok(Err(Refusal::NotAllowed));
+    }
     let services = model::services(&state.db).await?;
-    let target = match check_target(&services, body.target)? {
-        t @ (GrantTarget::Service { .. } | GrantTarget::Domain { .. }) => t,
-        GrantTarget::ExtraMinutes { minutes } if (5..=120).contains(&minutes) => {
+    let target = match check_target(&services, target) {
+        Ok(t @ (GrantTarget::Service { .. } | GrantTarget::Domain { .. })) => t,
+        Ok(GrantTarget::ExtraMinutes { minutes }) if (5..=120).contains(&minutes) => {
             GrantTarget::ExtraMinutes { minutes }
         }
-        _ => return Err(ApiError::bad_request("demande non prise en charge")),
+        _ => return Ok(Err(Refusal::Unsupported)),
     };
     let minutes = match target {
         GrantTarget::ExtraMinutes { .. } => None,
-        _ => Some(body.minutes.unwrap_or(60).clamp(5, 240)),
+        _ => Some(minutes.unwrap_or(60).clamp(5, 240)),
     };
-    let message = body
-        .message
-        .map(|m| m.trim().chars().take(200).collect::<String>())
-        .filter(|m| !m.is_empty());
+    let message =
+        message.map(|m| m.trim().chars().take(200).collect::<String>()).filter(|m| !m.is_empty());
 
     let (pending,): (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM requests WHERE child_id = ? AND status = 'pending'")
@@ -169,7 +192,7 @@ pub async fn request(
             .fetch_one(&state.db)
             .await?;
     if pending >= MAX_PENDING {
-        return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "trop de demandes en attente"));
+        return Ok(Err(Refusal::TooMany));
     }
 
     let id = util::new_id();
@@ -178,7 +201,7 @@ pub async fn request(
     )
     .bind(&id)
     .bind(&child.id)
-    .bind(&session.device_id)
+    .bind(device_id)
     .bind(serde_json::to_string(&target)?)
     .bind(minutes)
     .bind(&message)
@@ -190,6 +213,32 @@ pub async fn request(
     if let Some(message) = &message {
         text.push_str(&format!(" : « {message} »"));
     }
-    notify::push(&state, "Cotutelle : nouvelle demande", &text).await;
-    Ok(Json(json!({ "id": id })))
+    notify::push(state, "Cotutelle : nouvelle demande", &text).await;
+    Ok(Ok(id))
+}
+
+pub async fn request(
+    session: ChildSession,
+    State(state): State<Shared>,
+    Json(body): Json<RequestInput>,
+) -> ApiResult<Value> {
+    let outcome = create_request(
+        &state,
+        &session.child_id,
+        session.device_id.as_deref(),
+        body.target,
+        body.minutes,
+        body.message,
+    )
+    .await?;
+    match outcome {
+        Ok(id) => Ok(Json(json!({ "id": id }))),
+        Err(Refusal::NotAllowed) => {
+            Err(ApiError::new(StatusCode::FORBIDDEN, "les demandes ne sont pas activées"))
+        }
+        Err(Refusal::Unsupported) => Err(ApiError::bad_request("demande non prise en charge")),
+        Err(Refusal::TooMany) => {
+            Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "trop de demandes en attente"))
+        }
+    }
 }

@@ -5,17 +5,26 @@ use crate::platform::{Platform, Session};
 use crate::store::{Identity, Paths, UsageStore};
 use chrono::{DateTime, Datelike, Local, NaiveDate};
 use cotutelle_common::protocol::{AccountState, AgentMessage, DeviceState};
+use cotutelle_common::session::{
+    AgentEvent, Notice, OpenGrant, Opening, ServiceRef, SessionState, minutes_label,
+};
 use cotutelle_common::stats::DnsStats;
 use cotutelle_common::{
-    AccessStatus, Blocklists, FilterContext, HolidayPeriod, Usage, Verdict, evaluate,
-    evaluate_access,
+    AccessStatus, BlockReason, Blocklists, FilterContext, FilterPolicy, GrantTarget, HolidayPeriod,
+    Service, Usage, Verdict, catalog, evaluate, evaluate_access,
 };
 use cotutelle_dns::{Decision, Handler};
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, RwLock};
+use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 
 const DEFAULT_UPSTREAMS: &[&str] = &["9.9.9.9:53", "149.112.112.112:53"];
+/// Un site bloqué n'est signalé qu'une fois par quart d'heure : une page en
+/// sollicite des dizaines de fois.
+const BLOCKED_NOTICE_EVERY: Duration = Duration::from_secs(15 * 60);
 
 pub struct Runtime {
     pub identity: Identity,
@@ -40,6 +49,12 @@ pub struct Runtime {
     /// Messages en attente d'envoi au serveur.
     pub outbox: Mutex<Vec<AgentMessage>>,
     pub connected: AtomicBool,
+    /// Assistants de session connectés, par compte (D19).
+    pub helpers: Mutex<HashMap<String, Vec<mpsc::UnboundedSender<AgentEvent>>>>,
+    /// Dernier état envoyé à l'assistant de chaque compte.
+    pub helper_states: Mutex<HashMap<String, AgentEvent>>,
+    /// Derniers avis de blocage, par (compte, service ou site).
+    pub blocked_notices: Mutex<HashMap<(String, String), Instant>>,
 }
 
 impl Runtime {
@@ -121,6 +136,202 @@ impl Runtime {
             usage,
         )
     }
+
+    /// Enregistre un assistant pour ce compte et rend le flux de ses événements.
+    pub fn attach_helper(&self, account: &str) -> mpsc::UnboundedReceiver<AgentEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.helpers
+            .lock()
+            .expect("verrou assistants")
+            .entry(account.to_string())
+            .or_default()
+            .push(tx);
+        rx
+    }
+
+    pub fn helper_connected(&self, account: &str) -> bool {
+        let mut helpers = self.helpers.lock().expect("verrou assistants");
+        prune_helpers(&mut helpers);
+        helpers.contains_key(account)
+    }
+
+    /// Comptes ayant un assistant connecté.
+    pub fn helper_accounts(&self) -> Vec<String> {
+        let mut helpers = self.helpers.lock().expect("verrou assistants");
+        prune_helpers(&mut helpers);
+        helpers.keys().cloned().collect()
+    }
+
+    /// Transmet un événement aux assistants d'un compte ; `false` si aucun
+    /// n'est connecté : l'appelant se rabat sur les notifications du bureau.
+    pub fn tell_helper(&self, account: &str, event: AgentEvent) -> bool {
+        let mut helpers = self.helpers.lock().expect("verrou assistants");
+        let Some(list) = helpers.get_mut(account) else { return false };
+        list.retain(|tx| tx.send(event.clone()).is_ok());
+        if list.is_empty() {
+            helpers.remove(account);
+            return false;
+        }
+        true
+    }
+
+    /// Situation d'un compte géré, telle que son assistant la montre.
+    pub fn session_state(
+        &self,
+        account: &AccountState,
+        holidays: &[HolidayPeriod],
+        now: DateTime<Local>,
+    ) -> SessionState {
+        let rules = account.policy.rules_on(now.date_naive(), holidays);
+        let access = self.access(account, holidays, now);
+        let (day, time) = (now.weekday(), now.time());
+        let closes_at =
+            rules.schedule.ranges_for(day).iter().find(|r| r.contains(time)).and_then(|r| r.end);
+        let next_opening = (!access.open)
+            .then(|| rules.schedule.next_opening(day, time))
+            .flatten()
+            .map(|(day, time)| Opening { day, time });
+        let state = self.state.read().expect("verrou état");
+        let services = state.as_ref().map_or(&[][..], |s| s.services.as_slice());
+        let grants = account
+            .grants
+            .iter()
+            .filter(|g| g.is_active_at(now.to_utc()) && !matches!(g.target, GrantTarget::Pause))
+            .map(|g| OpenGrant {
+                label: grant_label(services, &g.target),
+                expires_at: g.expires_at,
+            })
+            .collect();
+        let filter = rules.filter;
+        let requestable_services = services
+            .iter()
+            .filter(|s| {
+                filter.blocked_services.contains(&s.id)
+                    && filter.requestable_services.contains(&s.id)
+            })
+            .map(|s| ServiceRef { id: s.id.clone(), label: s.label.clone() })
+            .collect();
+        SessionState {
+            child_name: account.child_name.clone(),
+            access,
+            closes_at,
+            next_opening,
+            holiday: rules.holiday.map(|h| h.label.clone()),
+            grants,
+            allow_requests: filter.allow_requests,
+            requestable_services,
+            server_connected: self.is_connected(),
+            dry_run: self.dry_run,
+        }
+    }
+
+    /// Ce qu'un assistant doit savoir de son compte à cet instant.
+    pub fn helper_event(&self, account: &str, now: DateTime<Local>) -> AgentEvent {
+        match self.account(account) {
+            Some(account) => AgentEvent::State(self.session_state(&account, &self.holidays(), now)),
+            None => AgentEvent::Unmanaged,
+        }
+    }
+
+    /// Envoie à chaque assistant la situation de son compte si elle a changé.
+    pub fn push_helper_states(&self, now: DateTime<Local>) {
+        for account in self.helper_accounts() {
+            let event = self.helper_event(&account, now);
+            let mut last = self.helper_states.lock().expect("verrou états assistants");
+            if last.get(&account) == Some(&event) {
+                continue;
+            }
+            if self.tell_helper(&account, event.clone()) {
+                last.insert(account, event);
+            } else {
+                last.remove(&account);
+            }
+        }
+    }
+
+    /// Signale un blocage à l'assistant du compte, une fois par service ou
+    /// par site et par quart d'heure.
+    fn notice_blocked(
+        &self,
+        account: &str,
+        name: &str,
+        reason: &BlockReason,
+        services: &[Service],
+        filter: &FilterPolicy,
+    ) {
+        let service = match reason {
+            BlockReason::Service(id) => services.iter().find(|s| s.id == *id),
+            BlockReason::DenyList | BlockReason::Category(_) => None,
+            // Pas un site : rien à expliquer.
+            BlockReason::Canary | BlockReason::Paused => return,
+        };
+        if !self.helper_connected(account) {
+            return;
+        }
+        let domain = site_of(name);
+        let key = service.map_or_else(|| domain.clone(), |s| s.id.clone());
+        {
+            let mut recent = self.blocked_notices.lock().expect("verrou avis de blocage");
+            let now = Instant::now();
+            recent.retain(|_, at| now.duration_since(*at) < BLOCKED_NOTICE_EVERY);
+            let key = (account.to_string(), key);
+            if recent.contains_key(&key) {
+                return;
+            }
+            recent.insert(key, now);
+        }
+        let requestable = filter.allow_requests
+            && service.is_some_and(|s| filter.requestable_services.contains(&s.id));
+        let notice = Notice::Blocked {
+            domain,
+            reason: reason.clone(),
+            service: service.map(|s| ServiceRef { id: s.id.clone(), label: s.label.clone() }),
+            requestable,
+        };
+        self.tell_helper(account, AgentEvent::Notice(notice));
+    }
+}
+
+/// Oublie les assistants partis.
+fn prune_helpers(helpers: &mut HashMap<String, Vec<mpsc::UnboundedSender<AgentEvent>>>) {
+    helpers.retain(|_, list| {
+        list.retain(|tx| !tx.is_closed());
+        !list.is_empty()
+    });
+}
+
+/// Libellé d'une ouverture pour l'enfant : « YouTube », « 30 min de plus ».
+fn grant_label(services: &[Service], target: &GrantTarget) -> String {
+    match target {
+        GrantTarget::Service { service } => services
+            .iter()
+            .find(|s| s.id == *service)
+            .map_or_else(|| service.clone(), |s| s.label.clone()),
+        GrantTarget::Category { category } => catalog::CATEGORIES
+            .iter()
+            .find(|c| c.id == category)
+            .map_or_else(|| category.clone(), |c| c.label.to_string()),
+        GrantTarget::Domain { domain } => domain.clone(),
+        GrantTarget::ExtraMinutes { minutes } => format!("{} de plus", minutes_label(*minutes)),
+        GrantTarget::IgnoreSchedule => "Hors horaires".to_string(),
+        GrantTarget::Pause => "Pause".to_string(),
+    }
+}
+
+/// Le site tel que l'enfant le voit dans sa barre d'adresse : `i.ytimg.com`
+/// devient `ytimg.com`, `www.bbc.co.uk` devient `bbc.co.uk`.
+fn site_of(name: &str) -> String {
+    let labels: Vec<&str> = name.split('.').filter(|l| !l.is_empty()).collect();
+    let n = labels.len();
+    if n <= 2 {
+        return name.to_string();
+    }
+    // Suffixes à deux niveaux les plus courants (`co.uk`, `com.au`) : sans
+    // liste publique complète, on garde trois labels dans ce cas.
+    let second_level = matches!(labels[n - 2], "co" | "com" | "org" | "net" | "gov" | "ac" | "edu")
+        && labels[n - 1].len() == 2;
+    let keep = if second_level { 3 } else { 2 };
+    labels[n - keep..].join(".")
 }
 
 /// Nom d'hôte du serveur, extrait de son adresse (`http://hôte:port/…`).
@@ -168,6 +379,9 @@ impl Handler for Runtime {
             _ => None,
         };
         self.stats.lock().expect("verrou stats").record(&os_account, name, blocked);
+        if let Some(reason) = blocked {
+            self.notice_blocked(&os_account, name, reason, &state.services, rules.filter);
+        }
         verdict.into()
     }
 
@@ -197,7 +411,15 @@ impl Handler for Runtime {
 
 #[cfg(test)]
 mod tests {
-    use super::server_host;
+    use super::{server_host, site_of};
+
+    #[test]
+    fn site_is_the_address_bar_domain() {
+        assert_eq!(site_of("i.ytimg.com"), "ytimg.com");
+        assert_eq!(site_of("www.youtube.com"), "youtube.com");
+        assert_eq!(site_of("www.bbc.co.uk"), "bbc.co.uk");
+        assert_eq!(site_of("example.org"), "example.org");
+    }
 
     #[test]
     fn server_host_is_extracted_from_url() {

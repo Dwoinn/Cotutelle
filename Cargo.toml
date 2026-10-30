@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/common", "crates/dns", "crates/server", "crates/agent"]
+members = ["crates/common", "crates/dns", "crates/server", "crates/agent", "crates/session"]
 
 [workspace.package]
 version = "0.1.0"
@@ -52,6 +52,10 @@ futures-util = "0.3"
 # Archives des listes UT1
 tar = "0.4"
 flate2 = "1"
+
+# Bureau de l'enfant (assistant de session) : D-Bus en Rust pur
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+ksni = "0.3"
 
 [profile.release]
 lto = "thin"

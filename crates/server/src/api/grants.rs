@@ -8,6 +8,7 @@ use crate::state::Shared;
 use crate::util;
 use axum::Json;
 use axum::extract::{Path, State};
+use cotutelle_common::protocol::ServerMessage;
 use cotutelle_common::{GrantTarget, Service, clean_domain, service_for_domain};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -229,6 +230,23 @@ async fn resolve(state: &Shared, id: &str, status: &str, parent_id: &str) -> Res
     Ok(())
 }
 
+/// Porte la réponse des parents à l'appareil d'où la demande est partie,
+/// pour que l'enfant la voie sur son bureau.
+async fn answer_device(state: &Shared, request_id: &str, approved: bool, text: String) {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT r.device_id, a.os_account FROM requests r
+         JOIN device_accounts a ON a.device_id = r.device_id AND a.child_id = r.child_id
+         WHERE r.id = ?",
+    )
+    .bind(request_id)
+    .fetch_optional(&state.db)
+    .await
+    .unwrap_or_default();
+    if let Some((device_id, os_account)) = row {
+        state.hub.send(&device_id, ServerMessage::RequestAnswered { os_account, approved, text });
+    }
+}
+
 pub async fn approve(
     parent: Parent,
     State(state): State<Shared>,
@@ -245,6 +263,14 @@ pub async fn approve(
     let (grant_id, expires_at) =
         insert_grant(&state, Some(&child_id), None, &target, minutes, &parent.id).await?;
     resolve(&state, &id, "approved", &parent.id).await?;
+    let services = model::services(&state.db).await?;
+    let what = describe_target(&services, &target);
+    let text = match (&target, minutes) {
+        (GrantTarget::ExtraMinutes { .. }, _) => format!("{} t'a accordé {what}.", parent.name),
+        (_, Some(m)) => format!("{} a accordé {what} pendant {}.", parent.name, minutes_label(m)),
+        (_, None) => format!("{} a accordé {what}.", parent.name),
+    };
+    answer_device(&state, &id, true, text).await;
     state.changed().await;
     Ok(Json(json!({ "grant_id": grant_id, "expires_at": expires_at })))
 }
@@ -254,8 +280,11 @@ pub async fn deny(
     State(state): State<Shared>,
     Path(id): Path<String>,
 ) -> ApiResult<Value> {
-    take_pending(&state, &id).await?;
+    let (_, target, _) = take_pending(&state, &id).await?;
     resolve(&state, &id, "denied", &parent.id).await?;
+    let services = model::services(&state.db).await?;
+    let what = describe_target(&services, &target);
+    answer_device(&state, &id, false, format!("{} n'a pas accordé {what}.", parent.name)).await;
     Ok(Json(json!({ "ok": true })))
 }
 

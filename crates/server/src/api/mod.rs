@@ -1,7 +1,7 @@
 //! Routes HTTP de l'API (`/api/v1`).
 
 mod agent;
-mod child;
+pub mod child;
 mod children;
 mod devices;
 mod grants;
@@ -15,6 +15,7 @@ use crate::state::Shared;
 use axum::Router;
 use axum::routing::{delete, get, post, put};
 use cotutelle_common::catalog;
+use cotutelle_common::session::minutes_label;
 use cotutelle_common::{GrantTarget, Service};
 
 pub fn router() -> Router<Shared> {
@@ -76,14 +77,6 @@ fn clean_name(name: &str, what: &str) -> Result<String, ApiError> {
         return Err(ApiError::bad_request(format!("{what} : entre 1 et 40 caractères")));
     }
     Ok(name.to_string())
-}
-
-fn minutes_label(minutes: u32) -> String {
-    match (minutes / 60, minutes % 60) {
-        (0, m) => format!("{m} min"),
-        (h, 0) => format!("{h} h"),
-        (h, m) => format!("{h} h {m:02}"),
-    }
 }
 
 /// Décrit une cible d'exception en français, pour les notifications.

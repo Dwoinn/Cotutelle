@@ -2,6 +2,8 @@
 set -e
 if [ "$1" = "configure" ]; then
     install -d -m 0700 /var/lib/cotutelle
+    # L'icône de barre de l'assistant de session vient du thème hicolor.
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor 2>/dev/null || true
     systemctl daemon-reload || true
     if [ -f /var/lib/cotutelle/agent.json ]; then
         # Mise à jour d'un appareil déjà rattaché : on relance l'agent.

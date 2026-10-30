@@ -88,6 +88,7 @@ plusieurs : deux parents, plusieurs enfants, plusieurs appareils.
 | D15 | **Licence AGPL-3.0-or-later avec clause d'attribution** (article 7(b)) ; le nom Cotutelle est réservé au projet officiel. Pas de cession de droits des contributeurs, attestation d'origine seulement. | L'objectif est de protéger la paternité, pas un revenu : chacun peut réutiliser et même vendre, à condition de publier son code et de citer le projet. |
 | D16 | **L'agent relaie d'abord vers les DNS annoncés par le réseau**, puis vers les résolveurs configurés. Une réponse négative d'un amont fait essayer le suivant. | Seuls les DNS du réseau connaissent les noms privés : serveur Cotutelle interne, NAS, portail captif. Le filtrage ayant lieu avant le relais, ce choix ne l'affaiblit pas. |
 | D17 | **Le catalogue des services est une donnée de la famille**, distribuée aux agents avec l'état de l'appareil. Les services fournis avec Cotutelle n'en sont que le point de départ. | Un service tient sur plusieurs domaines qui changent sans prévenir : les parents doivent pouvoir compléter une liste, ou ajouter un service, sans attendre une nouvelle version. |
+| D19 | **Un assistant de session, sans privilège, montre à l'enfant ce que l'agent décide.** `cotutelle-session` tourne dans la session (autostart XDG), parle à l'agent par une socket Unix locale (`/run/cotutelle/agent.sock`, un JSON par ligne) et au bureau par D-Bus seulement : notifications `org.freedesktop.Notifications` avec boutons, icône de barre StatusNotifierItem et son menu. L'agent lui pousse la situation du compte (temps restant, horaires, ouvertures, services demandables) et ses avis (préavis à 10, 5 et 1 minute, fermeture et son motif, site bloqué, réponse des parents), en reçoit les demandes de l'enfant et les relaie au serveur (`child_request`), qui renvoie la réponse à l'appareil d'origine (`request_answered`). Sans assistant, l'agent garde ses notifications de base et verrouille aussitôt ; avec lui, il laisse 30 secondes pour lire le motif et demander du temps. | L'agent reste seul à imposer quoi que ce soit (D3, D4) ; l'assistant ne reçoit que ce qui concerne le compte qui l'a lancé (identité du pair de la socket) et ne peut rien ouvrir. Rust pur, sans boîte à outils graphique : même image de construction (glibc 2.28), même binaire sur tous les bureaux ; des fenêtres natives (GTK 4, écran plein à l'ouverture de session, formulaire de demande) pourront s'y ajouter sans changer le canal. |
 | D18 | **Les vacances scolaires viennent du calendrier officiel** (jeu de données `fr-en-calendrier-scolaire` de data.education.gouv.fr) pour la zone choisie dans les réglages, que les parents ajustent : une période retirée, un pont ou un voyage ajouté. Les périodes effectives voyagent avec l'état de l'appareil (D14) ; une politique porte, en option, des règles de vacances (horaires, quota, filtre), et `Policy::rules_on` rend les règles d'un jour donné, partout où l'accès ou le filtre s'évalue. | Le parent ne doit pas changer les règles à la main deux fois par période. Le serveur, seul à parler au réseau, garde le calendrier en base et le rafraîchit chaque semaine ; sans zone ni période, rien ne change. Le quota hebdomadaire garde sa semaine, seul son plafond suit le jour courant : simple, sans proratisation. |
 
 ## 6. Modèle de domaine
@@ -150,7 +151,8 @@ parents non filtré.
   PC familial    │  • cache politique + listes (hors ligne)  │
                  │  • nftables : force DNS, bloque DoH/VPN   │
                  │  • logind : sessions, verrouillage        │
-                 │  • helper session : préavis, temps restant│
+                 │  • assistant de session (D19) : temps     │
+                 │    restant, préavis, blocages, demandes   │
                  └───────────────────────────────────────────┘
 ```
 
@@ -297,7 +299,7 @@ mise à jour automatique des agents.
 | La box ne permet pas de distribuer un DNS personnalisé (Livebox) | DNS manuel par appareil, ou DHCP intégré en phase 2 |
 | DoH, ECH, VPN gratuits | nftables + politiques navigateurs + alertes ; aucune parade n'est totale |
 | Cache DNS côté navigateur retarde les exceptions | TTL court, vidage par l'agent |
-| Notifications dans la session enfant sous Wayland | helper de session via D-Bus `org.freedesktop.Notifications` |
+| Notifications dans la session enfant sous Wayland | assistant de session (D19) par D-Bus `org.freedesktop.Notifications` ; repli `notify-send` par l'agent |
 | Listes UT1 volumineuses (plusieurs millions de domaines) | structure compacte en mémoire, chargement paresseux par catégorie |
 | Contournement physique (live USB) | documentation BIOS / chiffrement |
 | Toolchain Rust système ancienne (1.87) | `rust-toolchain.toml` épingle 1.99.0 pour ce projet, sans toucher au défaut |

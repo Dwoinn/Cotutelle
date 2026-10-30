@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Construit le paquet Debian de l'agent : target/debian/cotutelle-agent_<version>_<arch>.deb
-# Ne dépend que de cargo et de dpkg-deb. AGENT_BIN désigne un binaire déjà
-# compilé (voir docker/Dockerfile.agent) ; sans lui, le script compile l'agent.
+# Ne dépend que de cargo et de dpkg-deb. AGENT_BIN et SESSION_BIN désignent des
+# binaires déjà compilés (voir docker/Dockerfile.agent) ; sans eux, le script
+# compile l'agent et l'assistant de session.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -10,15 +11,19 @@ VERSION=$(cargo metadata --no-deps --format-version 1 |
 ARCH=$(dpkg --print-architecture)
 ROOT="target/debian/cotutelle-agent_${VERSION}_${ARCH}"
 
-if [ -z "${AGENT_BIN:-}" ]; then
-  cargo build --release -p cotutelle-agent
+if [ -z "${AGENT_BIN:-}" ] || [ -z "${SESSION_BIN:-}" ]; then
+  cargo build --release -p cotutelle-agent -p cotutelle-session
   AGENT_BIN=target/release/cotutelle-agent
+  SESSION_BIN=target/release/cotutelle-session
 fi
 
 rm -rf "$ROOT"
 install -D -m 0755 "$AGENT_BIN" "$ROOT/usr/bin/cotutelle-agent"
+install -D -m 0755 "$SESSION_BIN" "$ROOT/usr/bin/cotutelle-session"
 install -D -m 0644 packaging/cotutelle-agent.service "$ROOT/usr/lib/systemd/system/cotutelle-agent.service"
 install -D -m 0644 packaging/cotutelle.desktop "$ROOT/usr/share/applications/cotutelle.desktop"
+# L'assistant de session démarre avec chaque session graphique.
+install -D -m 0644 packaging/cotutelle-session.desktop "$ROOT/etc/xdg/autostart/cotutelle-session.desktop"
 install -D -m 0644 web/src/lib/assets/favicon.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/cotutelle.svg"
 install -D -m 0644 README.md "$ROOT/usr/share/doc/cotutelle-agent/README.md"
 cat > "$ROOT/usr/share/doc/cotutelle-agent/copyright" <<COPYRIGHT
@@ -51,7 +56,9 @@ Homepage: https://github.com/Dwoinn/cotutelle
 Description: Agent de contrôle parental Cotutelle
  Applique sur cet ordinateur les règles définies par les parents sur le
  serveur Cotutelle : filtrage DNS, horaires, temps d'écran et verrouillage
- de session. Continue de protéger sans connexion au serveur.
+ de session. Continue de protéger sans connexion au serveur. L'assistant de
+ session montre à l'enfant son temps restant, le prévient avant la
+ fermeture, explique les sites bloqués et transmet ses demandes.
 CONTROL
 
 dpkg-deb --build --root-owner-group "$ROOT" >/dev/null

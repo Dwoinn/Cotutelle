@@ -6,7 +6,8 @@
 //! la dernière politique connue (D3).
 
 use crate::{
-    BlockReason, ChildId, DeviceId, HolidayPeriod, Policy, Service, TemporaryGrant, Usage, catalog,
+    BlockReason, ChildId, DeviceId, GrantTarget, HolidayPeriod, Policy, Service, TemporaryGrant,
+    Usage, catalog,
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -62,6 +63,14 @@ pub enum ServerMessage {
     /// Verrouille immédiatement la session de ce compte.
     LockNow {
         os_account: String,
+    },
+    /// Réponse à une demande faite depuis le bureau de l'enfant, ou motif
+    /// pour lequel elle n'a pas été retenue.
+    RequestAnswered {
+        os_account: String,
+        approved: bool,
+        /// Phrase destinée à l'enfant : « Maman a accordé YouTube pendant 1 h ».
+        text: String,
     },
     Pong,
 }
@@ -120,6 +129,14 @@ pub enum AgentMessage {
         kind: TamperKind,
         at: DateTime<Utc>,
         details: String,
+    },
+    /// Demande de l'enfant faite depuis son bureau (D11), mêmes règles que
+    /// depuis son espace web.
+    ChildRequest {
+        os_account: String,
+        target: GrantTarget,
+        minutes: Option<u32>,
+        message: Option<String>,
     },
 }
 

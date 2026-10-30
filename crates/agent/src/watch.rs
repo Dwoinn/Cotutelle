@@ -3,9 +3,10 @@
 
 use crate::platform::Session;
 use crate::runtime::Runtime;
-use chrono::{DateTime, Local};
-use cotutelle_common::protocol::{AgentMessage, TamperKind};
-use cotutelle_common::{AccessStatus, ClosedReason};
+use chrono::{DateTime, Datelike, Local, NaiveTime, Weekday};
+use cotutelle_common::protocol::{AccountState, AgentMessage, TamperKind};
+use cotutelle_common::session::{AgentEvent, Notice, Opening};
+use cotutelle_common::{AccessStatus, ClosedReason, GrantTarget, HolidayPeriod};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -23,34 +24,66 @@ const CLOCK_TOLERANCE_SECONDS: i64 = 120;
 const CLOSED_NOTICE_EVERY_SECONDS: i64 = 60;
 /// Nombre d'échecs de verrouillage consécutifs avant d'alerter les parents.
 const LOCK_FAILURES_BEFORE_ALERT: u32 = 3;
+/// Avec un assistant de session, l'accès fermé laisse ce délai avant le
+/// verrou : le temps de lire le motif et de demander du temps.
+const HELPER_GRACE_SECONDS: i64 = 30;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Lock(Session),
-    Notify(Session, &'static str, String),
+    /// Avis à montrer dans la session : par l'assistant s'il est là, sinon
+    /// par les notifications du bureau.
+    Inform(Session, Notice),
 }
 
 /// Préavis déjà affichés pour un compte, pour ne pas les répéter.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Warned {
+    ten: bool,
     five: bool,
     one: bool,
+    /// Depuis quand l'accès est fermé sans interruption.
+    closed_since: Option<DateTime<Local>>,
     /// Dernier affichage du message « accès fermé ».
     closed_notice: Option<DateTime<Local>>,
 }
 
-fn closed_message(reason: Option<ClosedReason>) -> (&'static str, &'static str) {
-    match reason {
-        Some(ClosedReason::Paused) => ("Écran en pause", "Tes parents ont mis l'écran en pause."),
+const END_OF_DAY: NaiveTime = NaiveTime::from_hms_opt(23, 59, 59).expect("heure valide");
+
+/// Explique une fermeture : le motif, et quand ça rouvre.
+fn closed_notice(
+    account: &AccountState,
+    holidays: &[HolidayPeriod],
+    status: AccessStatus,
+    now: DateTime<Local>,
+    grace_seconds: u32,
+) -> Notice {
+    let rules = account.policy.rules_on(now.date_naive(), holidays);
+    let today = now.weekday();
+    let label = |(day, time)| Opening { day, time }.label(today);
+    let reopens = match status.reason {
         Some(ClosedReason::OutsideSchedule) => {
-            ("Ce n'est pas l'heure", "L'écran est verrouillé en dehors de tes horaires.")
+            rules.schedule.next_opening(today, now.time()).map(label)
         }
+        // Le quota du jour est épuisé : la prochaine ouverture est demain.
+        Some(ClosedReason::DailyQuota) => rules.schedule.next_opening(today, END_OF_DAY).map(label),
         Some(ClosedReason::WeeklyQuota) => {
-            ("Temps d'écran terminé", "Tu as utilisé tout ton temps pour cette semaine.")
+            rules.schedule.next_opening(Weekday::Sun, END_OF_DAY).map(label)
         }
-        Some(ClosedReason::DailyQuota) | None => {
-            ("Temps d'écran terminé", "Tu as utilisé tout ton temps pour aujourd'hui.")
-        }
+        Some(ClosedReason::Paused) => account
+            .grants
+            .iter()
+            .filter(|g| matches!(g.target, GrantTarget::Pause) && g.is_active_at(now.to_utc()))
+            .map(|g| g.expires_at.with_timezone(&Local))
+            .max()
+            .map(|at| label((at.weekday(), at.time()))),
+        None => None,
+    };
+    Notice::Closed {
+        reason: status.reason.unwrap_or(ClosedReason::DailyQuota),
+        reopens,
+        quota_minutes: status.quota_today_minutes,
+        grace_seconds,
     }
 }
 
@@ -83,43 +116,51 @@ pub fn step(
         let status: AccessStatus = rt.access(&account, &holidays, now);
         let memo = warned.entry(session.user.clone()).or_default();
 
+        let helper = rt.helper_connected(&session.user);
         if !status.open {
+            // Avec un assistant, la fermeture s'explique avant le verrou ;
+            // sans lui, le verrou suit la notification tout de suite.
+            let since = *memo.closed_since.get_or_insert(now);
+            let grace = if helper {
+                (HELPER_GRACE_SECONDS - (now - since).num_seconds()).max(0)
+            } else {
+                0
+            };
             // Le verrouillage est retenté à chaque pas tant que la session
             // reste ouverte ; l'explication, elle, n'est pas répétée en rafale.
             let recently = memo
                 .closed_notice
                 .is_some_and(|at| (now - at).num_seconds() < CLOSED_NOTICE_EVERY_SECONDS);
             if !recently {
-                let (title, body) = closed_message(status.reason);
-                actions.push(Action::Notify(session.clone(), title, body.to_string()));
+                memo.closed_notice = Some(now);
+                let notice = closed_notice(&account, &holidays, status, now, grace as u32);
+                actions.push(Action::Inform(session.clone(), notice));
             }
-            actions.push(Action::Lock(session.clone()));
-            *memo = Warned {
-                closed_notice: if recently { memo.closed_notice } else { Some(now) },
-                ..Default::default()
-            };
+            if grace == 0 {
+                actions.push(Action::Lock(session.clone()));
+            }
+            (memo.ten, memo.five, memo.one) = (false, false, false);
             continue;
         }
         memo.closed_notice = None;
+        memo.closed_since = None;
+        let warn = |minutes| Action::Inform(session.clone(), Notice::Warning { minutes });
         match status.remaining_minutes {
             Some(m) if m <= 1 && !memo.one => {
-                memo.one = true;
-                memo.five = true;
-                actions.push(Action::Notify(
-                    session.clone(),
-                    "Plus qu'une minute",
-                    "L'écran va se verrouiller.".to_string(),
-                ));
+                (memo.ten, memo.five, memo.one) = (true, true, true);
+                actions.push(warn(1));
             }
             Some(m) if m <= 5 && !memo.five => {
-                memo.five = true;
-                actions.push(Action::Notify(
-                    session.clone(),
-                    "Plus que 5 minutes",
-                    "Pense à enregistrer ce que tu fais.".to_string(),
-                ));
+                (memo.ten, memo.five) = (true, true);
+                actions.push(warn(5));
             }
-            Some(m) if m > 5 => *memo = Warned::default(),
+            // Le préavis de dix minutes est réservé à l'assistant : sans lui,
+            // l'agent garde ses deux rappels d'origine.
+            Some(m) if m <= 10 && !memo.ten && helper => {
+                memo.ten = true;
+                actions.push(warn(10));
+            }
+            Some(m) if m > 10 => *memo = Warned::default(),
             None => *memo = Warned::default(),
             _ => {}
         }
@@ -134,9 +175,16 @@ fn perform(rt: &Runtime, action: &Action) -> bool {
             tracing::info!(user = %session.user, dry_run = rt.dry_run, "verrouillage de la session");
             if rt.dry_run { Ok(()) } else { rt.platform.lock_session(session) }
         }
-        Action::Notify(session, title, body) => {
-            tracing::info!(user = %session.user, title, dry_run = rt.dry_run, "notification");
-            if rt.dry_run { Ok(()) } else { rt.platform.notify(session, title, body) }
+        Action::Inform(session, notice) => {
+            let title = notice.title();
+            tracing::info!(user = %session.user, title, dry_run = rt.dry_run, "avis");
+            // L'assistant reçoit l'avis même en mode d'essai : c'est ainsi
+            // qu'on regarde l'interface sans rien verrouiller.
+            if rt.tell_helper(&session.user, AgentEvent::Notice(notice.clone())) || rt.dry_run {
+                Ok(())
+            } else {
+                rt.platform.notify(session, &title, &notice.body())
+            }
         }
     };
     if let Err(e) = &result {
@@ -180,6 +228,16 @@ pub fn lock_account(rt: &Runtime, os_account: &str) {
     let Ok(sessions) = rt.platform.sessions() else { return };
     for session in sessions.into_iter().filter(|s| s.user == os_account && !s.locked) {
         perform(rt, &Action::Lock(session));
+    }
+}
+
+/// Montre un avis à un compte, par son assistant ou dans sa session en usage.
+pub fn inform_account(rt: &Runtime, os_account: &str, notice: Notice) {
+    if rt.tell_helper(os_account, AgentEvent::Notice(notice.clone())) {
+        return;
+    }
+    if let Some(session) = rt.sessions().into_iter().find(|s| s.user == os_account && s.in_use()) {
+        perform(rt, &Action::Inform(session, notice));
     }
 }
 
@@ -232,6 +290,7 @@ pub async fn run(rt: Arc<Runtime>, enforced: Option<SocketAddr>) {
                     last_sessions = Some(sessions.clone());
                 }
                 let actions = step(&rt, &sessions, elapsed, now, &mut warned);
+                rt.push_helper_states(now);
                 // Verrouiller attend la confirmation du bureau : hors du fil asynchrone.
                 let outcomes = {
                     let rt = rt.clone();
@@ -304,6 +363,9 @@ mod tests {
         fn os_accounts(&self) -> Vec<String> {
             vec![]
         }
+        fn account_name(&self, _: u32) -> Option<String> {
+            None
+        }
         fn sessions(&self) -> anyhow::Result<Vec<Session>> {
             Ok(vec![])
         }
@@ -370,6 +432,9 @@ mod tests {
             network_dns: Default::default(),
             outbox: Default::default(),
             connected: Default::default(),
+            helpers: Default::default(),
+            helper_states: Default::default(),
+            blocked_notices: Default::default(),
         }
     }
 
@@ -425,7 +490,7 @@ mod tests {
         // Le lendemain, hors période : le quota scolaire est dépassé.
         let tomorrow = noon() + chrono::Duration::days(1);
         let actions = step(&rt, &[session("louis", false, false)], 5, tomorrow, &mut warned);
-        assert!(matches!(actions.as_slice(), [Action::Notify(..), Action::Lock(_)]));
+        assert!(matches!(actions.as_slice(), [Action::Inform(..), Action::Lock(_)]));
     }
 
     #[test]
@@ -445,12 +510,22 @@ mod tests {
         // 54 min consommées ailleurs + 60 s ici : il reste 5 minutes.
         rt.state.write().unwrap().as_mut().unwrap().accounts[0].usage_elsewhere.today_minutes = 54;
         let first = step(&rt, &sessions, 60, noon(), &mut warned);
-        assert!(matches!(first.as_slice(), [Action::Notify(_, "Plus que 5 minutes", _)]));
+        assert!(matches!(first.as_slice(), [Action::Inform(_, Notice::Warning { minutes: 5 })]));
         assert!(step(&rt, &sessions, 5, noon(), &mut warned).is_empty(), "pas de répétition");
 
         rt.state.write().unwrap().as_mut().unwrap().accounts[0].usage_elsewhere.today_minutes = 58;
         let second = step(&rt, &sessions, 5, noon(), &mut warned);
-        assert!(matches!(second.as_slice(), [Action::Notify(_, "Plus qu'une minute", _)]));
+        assert!(matches!(second.as_slice(), [Action::Inform(_, Notice::Warning { minutes: 1 })]));
+    }
+
+    #[test]
+    fn ten_minute_warning_is_for_the_helper_only() {
+        let rt = runtime(60, vec![], 52);
+        let sessions = [session("louis", false, false)];
+        assert!(step(&rt, &sessions, 5, noon(), &mut HashMap::new()).is_empty());
+        let _helper = rt.attach_helper("louis");
+        let actions = step(&rt, &sessions, 5, noon(), &mut HashMap::new());
+        assert!(matches!(actions.as_slice(), [Action::Inform(_, Notice::Warning { minutes: 10 })]));
     }
 
     #[test]
@@ -460,7 +535,8 @@ mod tests {
         let actions = step(&rt, &[session("louis", false, false)], 5, noon(), &mut HashMap::new());
         assert!(matches!(
             actions.as_slice(),
-            [Action::Notify(_, "Temps d'écran terminé", _), Action::Lock(s)] if s.user == "louis"
+            [Action::Inform(_, Notice::Closed { reason: ClosedReason::DailyQuota, quota_minutes: Some(60), grace_seconds: 0, .. }), Action::Lock(s)]
+                if s.user == "louis"
         ));
         // Une fois verrouillée, la session n'est plus sollicitée.
         assert!(
@@ -474,7 +550,7 @@ mod tests {
         let mut warned = HashMap::new();
         let sessions = [session("louis", false, false)];
         let first = step(&rt, &sessions, 5, noon(), &mut warned);
-        assert!(matches!(first.as_slice(), [Action::Notify(..), Action::Lock(_)]));
+        assert!(matches!(first.as_slice(), [Action::Inform(..), Action::Lock(_)]));
         // La session est toujours ouverte cinq secondes plus tard : on
         // reverrouille, sans réafficher le message.
         let later = noon() + ChronoDuration::seconds(5);
@@ -483,7 +559,63 @@ mod tests {
         // Une minute après, l'enfant a rouvert sa session : on réexplique.
         let much_later = noon() + ChronoDuration::seconds(70);
         let third = step(&rt, &sessions, 5, much_later, &mut warned);
-        assert!(matches!(third.as_slice(), [Action::Notify(..), Action::Lock(_)]));
+        assert!(matches!(third.as_slice(), [Action::Inform(..), Action::Lock(_)]));
+    }
+
+    #[test]
+    fn with_a_helper_the_lock_waits_for_the_explanation() {
+        let rt = runtime(60, vec![], 60);
+        let mut helper = rt.attach_helper("louis");
+        let mut warned = HashMap::new();
+        let sessions = [session("louis", false, false)];
+        let first = step(&rt, &sessions, 5, noon(), &mut warned);
+        assert!(matches!(
+            first.as_slice(),
+            [Action::Inform(_, Notice::Closed { grace_seconds: 30, .. })]
+        ));
+        // L'avis part à l'assistant, pas aux notifications du bureau.
+        assert!(perform(&rt, &first[0]));
+        assert!(matches!(helper.try_recv(), Ok(AgentEvent::Notice(Notice::Closed { .. }))));
+        let soon = noon() + ChronoDuration::seconds(10);
+        assert!(step(&rt, &sessions, 5, soon, &mut warned).is_empty());
+        let later = noon() + ChronoDuration::seconds(30);
+        assert!(matches!(
+            step(&rt, &sessions, 5, later, &mut warned).as_slice(),
+            [Action::Lock(_)]
+        ));
+        // Assistant parti : plus de délai.
+        drop(helper);
+        let actions = step(&rt, &sessions, 5, noon(), &mut HashMap::new());
+        assert!(matches!(actions.as_slice(), [Action::Inform(..), Action::Lock(_)]));
+    }
+
+    #[test]
+    fn helper_state_says_what_the_child_can_ask() {
+        let rt = runtime(60, vec![], 20);
+        {
+            let mut state = rt.state.write().unwrap();
+            let state = state.as_mut().unwrap();
+            state.services = cotutelle_common::catalog::builtin_services();
+            let filter = &mut state.accounts[0].policy.filter;
+            filter.blocked_services.insert("youtube".into());
+            filter.requestable_services.insert("youtube".into());
+            filter.allow_requests = true;
+        }
+        let mut helper = rt.attach_helper("louis");
+        rt.push_helper_states(noon());
+        let Ok(AgentEvent::State(state)) = helper.try_recv() else { panic!("état attendu") };
+        assert_eq!(state.child_name, "Louis");
+        assert_eq!(state.access.remaining_minutes, Some(40));
+        assert_eq!(state.requestable_services.len(), 1);
+        assert_eq!(state.requestable_services[0].label, "YouTube");
+        assert!(state.allow_requests);
+        // Rien de neuf : rien d'envoyé.
+        rt.push_helper_states(noon());
+        assert!(helper.try_recv().is_err());
+        // Un compte non géré reçoit « non géré » une fois.
+        let mut other = rt.attach_helper("papa");
+        rt.push_helper_states(noon());
+        assert!(matches!(other.try_recv(), Ok(AgentEvent::Unmanaged)));
     }
 
     #[test]
@@ -521,7 +653,13 @@ mod tests {
         let actions = step(&paused, &sessions, 5, now, &mut HashMap::new());
         assert!(matches!(
             actions.as_slice(),
-            [Action::Notify(_, "Écran en pause", _), Action::Lock(_)]
+            [
+                Action::Inform(
+                    _,
+                    Notice::Closed { reason: ClosedReason::Paused, reopens: Some(_), .. }
+                ),
+                Action::Lock(_)
+            ]
         ));
     }
 }

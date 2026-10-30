@@ -12,6 +12,7 @@ pub mod ids;
 pub mod policy;
 pub mod protocol;
 pub mod schedule;
+pub mod session;
 pub mod stats;
 
 pub use access::*;
@@ -29,4 +30,8 @@ pub use schedule::*;
 /// de vacances, ajoutées ensuite à l'état, n'ont pas changé le numéro : un
 /// agent qui les ignore applique les règles de période scolaire toute
 /// l'année, et une politique sans règles de vacances est inchangée.
-pub const PROTOCOL_VERSION: u16 = 2;
+///
+/// 3 : l'agent relaie les demandes de l'enfant faites depuis son bureau
+/// (`child_request`) et le serveur lui renvoie la réponse des parents
+/// (`request_answered`). Un serveur en version 2 ignore ces demandes.
+pub const PROTOCOL_VERSION: u16 = 3;

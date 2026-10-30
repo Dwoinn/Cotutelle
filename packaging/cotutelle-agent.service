@@ -13,6 +13,9 @@ ExecStart=/usr/bin/cotutelle-agent run
 ExecStopPost=/usr/bin/cotutelle-agent release
 Restart=always
 RestartSec=2
+# Socket de liaison avec l'assistant de session (/run/cotutelle/agent.sock).
+RuntimeDirectory=cotutelle
+RuntimeDirectoryMode=0755
 # L'agent doit rester root : nftables, systemd-resolved, logind.
 User=root
 PrivateTmp=true

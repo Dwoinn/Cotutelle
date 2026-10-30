@@ -295,6 +295,33 @@ async fn handle(
             };
             notify::alert(state, "tamper", Some(device_id), None, &message).await?;
         }
+        AgentMessage::ChildRequest { os_account, target, minutes, message } => {
+            let Some(child_id) = child_of_account(state, device_id, &os_account).await? else {
+                return Ok(());
+            };
+            let outcome = crate::api::child::create_request(
+                state,
+                &child_id,
+                Some(device_id),
+                target,
+                minutes,
+                message,
+            )
+            .await?;
+            // L'enfant apprend tout de suite qu'une demande n'a pas été retenue ;
+            // sinon il attend la réponse de ses parents, envoyée à leur décision.
+            if let Err(refusal) = outcome {
+                tracing::info!(device_id, os_account, ?refusal, "demande non retenue");
+                state.hub.send(
+                    device_id,
+                    ServerMessage::RequestAnswered {
+                        os_account,
+                        approved: false,
+                        text: refusal.text().to_string(),
+                    },
+                );
+            }
+        }
     }
     Ok(())
 }

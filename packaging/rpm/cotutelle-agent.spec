@@ -1,5 +1,6 @@
 # Paquet RPM de l'agent, construit par scripts/build-rpm.sh à partir d'un
-# binaire déjà compilé : pkg_version, srcdir et agent_bin viennent du script.
+# binaire déjà compilé : pkg_version, srcdir, agent_bin et session_bin viennent
+# du script.
 
 # Le binaire est déjà optimisé et épuré par cargo.
 %global debug_package %{nil}
@@ -27,6 +28,8 @@ de session. Continue de protéger sans connexion au serveur.
 
 %install
 install -D -m 0755 %{agent_bin} %{buildroot}%{_bindir}/cotutelle-agent
+install -D -m 0755 %{session_bin} %{buildroot}%{_bindir}/cotutelle-session
+install -D -m 0644 %{srcdir}/packaging/cotutelle-session.desktop %{buildroot}%{_sysconfdir}/xdg/autostart/cotutelle-session.desktop
 install -D -m 0644 %{srcdir}/packaging/cotutelle-agent.service %{buildroot}/usr/lib/systemd/system/cotutelle-agent.service
 install -D -m 0644 %{srcdir}/packaging/cotutelle.desktop %{buildroot}%{_datadir}/applications/cotutelle.desktop
 install -D -m 0644 %{srcdir}/web/src/lib/assets/favicon.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/cotutelle.svg
@@ -36,6 +39,8 @@ install -D -m 0644 %{srcdir}/LICENSE %{buildroot}%{_datadir}/doc/cotutelle-agent
 
 %files
 %{_bindir}/cotutelle-agent
+%{_bindir}/cotutelle-session
+%{_sysconfdir}/xdg/autostart/cotutelle-session.desktop
 /usr/lib/systemd/system/cotutelle-agent.service
 %{_datadir}/applications/cotutelle.desktop
 %{_datadir}/icons/hicolor/scalable/apps/cotutelle.svg
@@ -43,6 +48,7 @@ install -D -m 0644 %{srcdir}/LICENSE %{buildroot}%{_datadir}/doc/cotutelle-agent
 
 %post
 install -d -m 0700 /var/lib/cotutelle
+gtk-update-icon-cache -q -t -f %{_datadir}/icons/hicolor 2>/dev/null || :
 systemctl daemon-reload || :
 if [ -f /var/lib/cotutelle/agent.json ]; then
     # Mise à jour d'un appareil déjà rattaché : on relance l'agent.

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Assistant Cotutelle
+Comment=Temps restant, préavis, sites bloqués et demandes aux parents, dans la session
+Exec=cotutelle-session
+Icon=cotutelle
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-Phase=Applications
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel

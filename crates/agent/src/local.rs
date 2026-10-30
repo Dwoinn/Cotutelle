@@ -79,6 +79,7 @@ async fn status(State(rt): State<Arc<Runtime>>) -> Json<Value> {
                 "access": rt.access(account, &holidays, now),
                 "local_seconds_today": local,
                 "grants": account.grants.len(),
+                "helper": rt.helper_connected(&account.os_account),
             })
         })
         .collect();

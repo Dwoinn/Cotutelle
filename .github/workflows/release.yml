@@ -30,7 +30,8 @@ jobs:
             exit 1
           fi
 
-  # Un binaire lié à une glibc ancienne, décliné en .deb, .rpm et archive.
+  # L'agent et l'assistant de session, liés à une glibc ancienne, déclinés
+  # en .deb, .rpm et archive.
   agent-linux:
     needs: version
     strategy:
@@ -50,11 +51,13 @@ jobs:
         run: |
           docker buildx build -f docker/Dockerfile.agent --output type=local,dest=dist/bin .
           dist/bin/cotutelle-agent --version
+          dist/bin/cotutelle-session --version
       # Les scripts de paquets lisent la version avec cargo.
       - run: rustup show
       - name: Paquets .deb et .rpm
         env:
           AGENT_BIN: dist/bin/cotutelle-agent
+          SESSION_BIN: dist/bin/cotutelle-session
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends rpm
@@ -63,7 +66,8 @@ jobs:
         run: |
           root="cotutelle-agent-$VERSION-linux-${{ matrix.arch }}"
           mkdir "$root"
-          cp dist/bin/cotutelle-agent packaging/cotutelle-agent.service packaging/cotutelle.desktop \
+          cp dist/bin/cotutelle-agent dist/bin/cotutelle-session packaging/cotutelle-agent.service \
+            packaging/cotutelle.desktop packaging/cotutelle-session.desktop \
             README.md NOTICE.md LICENSE "$root/"
           cp web/src/lib/assets/favicon.svg "$root/cotutelle.svg"
           tar -czf "dist/$root.tar.gz" "$root"

@@ -349,6 +349,16 @@ fn parse_passwd(passwd: &str) -> Vec<String> {
         .collect()
 }
 
+/// Nom du compte d'UID donné dans `/etc/passwd`.
+fn passwd_name(passwd: &str, uid: u32) -> Option<String> {
+    passwd.lines().find_map(|line| {
+        let mut fields = line.split(':');
+        let name = fields.next()?;
+        let found: u32 = fields.nth(1)?.parse().ok()?;
+        (found == uid).then(|| name.to_string())
+    })
+}
+
 pub(crate) fn resolved_dropin(resolver: SocketAddr) -> String {
     format!(
         "# Géré par {MARKER} — ne pas modifier.\n[Resolve]\nDNS={resolver}\nDomains=~.\nFallbackDNS=\nDNSOverTLS=no\nLLMNR=no\n"
@@ -464,6 +474,10 @@ impl Platform for Linux {
 
     fn os_accounts(&self) -> Vec<String> {
         std::fs::read_to_string("/etc/passwd").map(|p| parse_passwd(&p)).unwrap_or_default()
+    }
+
+    fn account_name(&self, uid: u32) -> Option<String> {
+        std::fs::read_to_string("/etc/passwd").ok().and_then(|p| passwd_name(&p, uid))
     }
 
     fn sessions(&self) -> Result<Vec<Session>> {
@@ -690,6 +704,8 @@ mod tests {
                       svc:x:1002:1002::/home/svc:/usr/sbin/nologin\n\
                       nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n";
         assert_eq!(parse_passwd(passwd), ["papa", "louis"]);
+        assert_eq!(passwd_name(passwd, 1001).as_deref(), Some("louis"));
+        assert_eq!(passwd_name(passwd, 4242), None);
     }
 
     #[test]

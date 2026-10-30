@@ -53,6 +53,9 @@ pub trait Platform: Send + Sync {
     /// Comptes de session « humains » présents sur l'appareil.
     fn os_accounts(&self) -> Vec<String>;
 
+    /// Nom du compte portant cet identifiant d'utilisateur.
+    fn account_name(&self, uid: u32) -> Option<String>;
+
     /// Sessions interactives ouvertes (hors écran de connexion et services).
     fn sessions(&self) -> Result<Vec<Session>>;
 

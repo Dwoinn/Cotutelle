@@ -105,6 +105,31 @@ c'est le réglage des comptes parents.
 
 L'enfant trouve « Mon temps d'écran » dans le menu de ses applications.
 
+### L'assistant de session
+
+Le paquet installe aussi `cotutelle-session`, lancé dans chaque session
+graphique (`/etc/xdg/autostart`). Dans la session d'un enfant, il affiche une
+icône de barre avec son temps restant et, dans son menu, le détail : jusqu'à
+quelle heure, temps du jour, règles de vacances, ouvertures en cours. Il
+prévient à 10, 5 et 1 minute, explique une fermeture (temps écoulé, horaires,
+pause) et quand ça rouvre, signale un site bloqué avec le motif, et propose
+« Demander du temps » ou « Demander l'accès » quand les parents ont activé les
+demandes. Elles arrivent aux parents comme celles de l'espace enfant, et la
+réponse revient sur le bureau. Dans la session d'un parent, l'icône reste
+cachée.
+
+Quand l'assistant est là, l'agent laisse trente secondes entre l'explication
+et le verrouillage ; sans lui (autre bureau, session texte), il garde ses
+notifications `notify-send` et verrouille aussitôt. Sous GNOME, l'icône de
+barre passe par l'extension AppIndicator, active par défaut sous Ubuntu ; les
+notifications fonctionnent partout. L'assistant n'a aucun privilège : il
+parle à l'agent par `/run/cotutelle/agent.sock` et ne voit que son propre
+compte. Ses messages sont dans `journalctl --user`.
+
+Pour le voir à l'œuvre sans rien verrouiller : `cotutelle-agent run
+--dry-run`, puis `cotutelle-session` dans la session (`--socket` si la socket
+n'est pas à l'endroit habituel).
+
 ### Ce que l'agent change sur la machine
 
 - `/etc/systemd/resolved.conf.d/cotutelle.conf` : tout le DNS passe par le
@@ -156,7 +181,7 @@ La clé `sessions` donne, pour chaque session ouverte, `en usage`,
 ### Diagnostic
 
 ```bash
-cotutelle-agent status              # état, compte au premier plan, temps restant
+cotutelle-agent status              # état, compte au premier plan, temps restant, assistant connecté
 journalctl -u cotutelle-agent -f    # journal
 ```
 

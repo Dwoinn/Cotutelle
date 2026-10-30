@@ -4,6 +4,18 @@
 //! filtrant, décompte du temps d'écran, verrouillage. Sans serveur, la
 //! dernière politique connue reste appliquée (D3).
 
+#[cfg(unix)]
+mod helper;
+/// Sans socket Unix, pas d'assistant : l'agent garde ses notifications de base.
+#[cfg(not(unix))]
+mod helper {
+    pub async fn serve(
+        _: std::sync::Arc<crate::runtime::Runtime>,
+        _: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        anyhow::bail!("assistant de session non pris en charge sur ce système")
+    }
+}
 mod local;
 mod platform;
 mod runtime;
@@ -52,6 +64,9 @@ enum Command {
         /// Adresse du serveur HTTP local (espace enfant, état).
         #[arg(long, env = "COTUTELLE_LOCAL_ADDR", default_value = "127.0.0.1:7465")]
         local_addr: SocketAddr,
+        /// Socket de liaison avec l'assistant de session (`cotutelle-session`).
+        #[arg(long, env = "COTUTELLE_HELPER_SOCKET", default_value = "/run/cotutelle/agent.sock")]
+        helper_socket: PathBuf,
         /// Ne touche ni à systemd-resolved ni à nftables.
         #[arg(long, env = "COTUTELLE_NO_ENFORCE")]
         no_enforce: bool,
@@ -104,6 +119,7 @@ async fn run(
     paths: Paths,
     dns_addr: SocketAddr,
     local_addr: SocketAddr,
+    helper_socket: PathBuf,
     no_enforce: bool,
     dry_run: bool,
 ) -> Result<()> {
@@ -131,6 +147,9 @@ async fn run(
         network_dns: Default::default(),
         outbox: Default::default(),
         connected: AtomicBool::new(false),
+        helpers: Default::default(),
+        helper_states: Default::default(),
+        blocked_notices: Default::default(),
     });
 
     // Les listes déjà sur disque protègent dès le démarrage, serveur joignable ou non.
@@ -159,16 +178,31 @@ async fn run(
         Some(dns_addr)
     };
 
+    // L'assistant de session est un plus : sans la socket (poste de
+    // développement sans droits), l'agent protège quand même.
+    let helpers = {
+        let rt = rt.clone();
+        let path = helper_socket.clone();
+        async move {
+            if let Err(e) = helper::serve(rt, &path).await {
+                tracing::warn!(error = %e, "liaison avec l'assistant de session indisponible");
+            }
+            std::future::pending::<()>().await
+        }
+    };
+
     tokio::select! {
         result = dns.run() => result.context("résolveur DNS")?,
         result = local::serve(rt.clone(), local_addr) => result.context("serveur local")?,
         () = sync::run(rt.clone()) => {}
         () = watch::run(rt.clone(), enforced) => {}
+        () = helpers => {}
         () = platform::shutdown_signal() => tracing::info!("arrêt demandé"),
     }
 
     // Dernière sauvegarde du temps d'écran avant de quitter.
     rt.paths.save_usage(&rt.usage.lock().expect("verrou temps"))?;
+    let _ = std::fs::remove_file(&helper_socket);
     Ok(())
 }
 
@@ -192,8 +226,8 @@ async fn main() -> Result<()> {
     let paths = Paths::new(cli.state_dir);
     match cli.command {
         Command::Enroll { server, code } => enroll(&paths, &server, &code).await,
-        Command::Run { dns_addr, local_addr, no_enforce, dry_run } => {
-            run(paths, dns_addr, local_addr, no_enforce, dry_run).await
+        Command::Run { dns_addr, local_addr, helper_socket, no_enforce, dry_run } => {
+            run(paths, dns_addr, local_addr, helper_socket, no_enforce, dry_run).await
         }
         Command::Status { local_addr } => status(local_addr).await,
         Command::Release => platform::detect().release_dns(),
