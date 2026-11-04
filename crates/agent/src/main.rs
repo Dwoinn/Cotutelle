@@ -1,4 +1,5 @@
-//! Agent Cotutelle : tourne en service root sur l'appareil protégé.
+//! Agent Cotutelle : tourne en service root (ou SYSTEM) sur l'appareil
+//! protégé.
 //!
 //! Il applique en local la politique reçue du serveur : résolveur DNS
 //! filtrant, décompte du temps d'écran, verrouillage. Sans serveur, la
@@ -13,7 +14,7 @@ mod sync;
 mod watch;
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use cotutelle_common::protocol::{EnrollRequest, EnrollResponse};
 use runtime::Runtime;
 use std::net::SocketAddr;
@@ -34,6 +35,23 @@ struct Cli {
     command: Command,
 }
 
+/// Réglages communs au lancement en console et en service.
+#[derive(Args, Debug, Clone)]
+struct RunOptions {
+    /// Adresse du résolveur DNS local.
+    #[arg(long, env = "COTUTELLE_DNS_ADDR", default_value = platform::DEFAULT_DNS_ADDR)]
+    dns_addr: SocketAddr,
+    /// Adresse du serveur HTTP local (espace enfant, état).
+    #[arg(long, env = "COTUTELLE_LOCAL_ADDR", default_value = "127.0.0.1:7465")]
+    local_addr: SocketAddr,
+    /// Socket (ou tube nommé) de liaison avec l'assistant de session.
+    #[arg(long, env = "COTUTELLE_HELPER_SOCKET", default_value = platform::DEFAULT_HELPER_SOCKET)]
+    helper_socket: PathBuf,
+    /// Ne touche ni au résolveur du système ni au pare-feu.
+    #[arg(long, env = "COTUTELLE_NO_ENFORCE")]
+    no_enforce: bool,
+}
+
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Rattache cet appareil à un serveur avec le code affiché dans l'interface.
@@ -45,20 +63,10 @@ enum Command {
         #[arg(long)]
         code: String,
     },
-    /// Lance l'agent (mode service).
+    /// Lance l'agent en console.
     Run {
-        /// Adresse du résolveur DNS local.
-        #[arg(long, env = "COTUTELLE_DNS_ADDR", default_value = platform::DEFAULT_DNS_ADDR)]
-        dns_addr: SocketAddr,
-        /// Adresse du serveur HTTP local (espace enfant, état).
-        #[arg(long, env = "COTUTELLE_LOCAL_ADDR", default_value = "127.0.0.1:7465")]
-        local_addr: SocketAddr,
-        /// Socket de liaison avec l'assistant de session (`cotutelle-session`).
-        #[arg(long, env = "COTUTELLE_HELPER_SOCKET", default_value = platform::DEFAULT_HELPER_SOCKET)]
-        helper_socket: PathBuf,
-        /// Ne touche ni à systemd-resolved ni à nftables.
-        #[arg(long, env = "COTUTELLE_NO_ENFORCE")]
-        no_enforce: bool,
+        #[command(flatten)]
+        options: RunOptions,
         /// Journalise verrouillages et notifications sans les exécuter.
         #[arg(long, env = "COTUTELLE_DRY_RUN")]
         dry_run: bool,
@@ -70,6 +78,24 @@ enum Command {
     },
     /// Retire la protection DNS du système (avant désinstallation).
     Release,
+    /// Enregistre l'agent comme service Windows et le démarre si l'appareil
+    /// est rattaché (console administrateur).
+    #[cfg(windows)]
+    Install {
+        /// Adresse du serveur HTTP local, pour le raccourci « Mon temps d'écran ».
+        #[arg(long, env = "COTUTELLE_LOCAL_ADDR", default_value = "127.0.0.1:7465")]
+        local_addr: SocketAddr,
+    },
+    /// Arrête et retire le service Windows, et rend au système sa
+    /// configuration DNS. L'identité de l'appareil est conservée.
+    #[cfg(windows)]
+    Uninstall,
+    /// Point d'entrée du gestionnaire de services Windows (pas en console).
+    #[cfg(windows)]
+    Service {
+        #[command(flatten)]
+        options: RunOptions,
+    },
 }
 
 async fn enroll(paths: &Paths, server: &str, code: &str) -> Result<()> {
@@ -101,17 +127,17 @@ async fn enroll(paths: &Paths, server: &str, code: &str) -> Result<()> {
         token: enrolled.device_token,
     })?;
     println!("Appareil rattaché. Associez maintenant les comptes aux enfants dans l'interface.");
+    #[cfg(windows)]
+    match platform::windows::service::start_if_installed() {
+        Ok(true) => println!("Service cotutelle-agent démarré."),
+        Ok(false) => println!("Enregistrez ensuite le service : cotutelle-agent install"),
+        Err(e) => tracing::warn!(error = %e, "démarrage du service"),
+    }
     Ok(())
 }
 
-async fn run(
-    paths: Paths,
-    dns_addr: SocketAddr,
-    local_addr: SocketAddr,
-    helper_socket: PathBuf,
-    no_enforce: bool,
-    dry_run: bool,
-) -> Result<()> {
+async fn run(paths: Paths, options: RunOptions, dry_run: bool) -> Result<()> {
+    let RunOptions { dns_addr, local_addr, helper_socket, no_enforce } = options;
     let identity = paths
         .load_identity()?
         .context("appareil non rattaché : lancez d'abord `cotutelle-agent enroll`")?;
@@ -191,6 +217,7 @@ async fn run(
 
     // Dernière sauvegarde du temps d'écran avant de quitter.
     rt.paths.save_usage(&rt.usage.lock().expect("verrou temps"))?;
+    #[cfg(unix)]
     let _ = std::fs::remove_file(&helper_socket);
     Ok(())
 }
@@ -205,20 +232,52 @@ async fn status(local_addr: SocketAddr) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .init();
+fn log_filter() -> EnvFilter {
+    EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())
+}
 
-    let cli = Cli::parse();
-    let paths = Paths::new(cli.state_dir);
-    match cli.command {
+/// Lancé par le gestionnaire de services : pas de console, le journal va
+/// dans le répertoire d'état.
+#[cfg(windows)]
+fn service(paths: Paths, options: RunOptions) -> Result<()> {
+    let log = store::open_log(paths.log_path())?;
+    tracing_subscriber::fmt()
+        .with_env_filter(log_filter())
+        .with_ansi(false)
+        .with_writer(Arc::new(log))
+        .init();
+    platform::windows::service::dispatch(move || {
+        tokio::runtime::Runtime::new()?.block_on(run(paths, options, false))
+    })
+}
+
+async fn dispatch(paths: Paths, command: Command) -> Result<()> {
+    match command {
         Command::Enroll { server, code } => enroll(&paths, &server, &code).await,
-        Command::Run { dns_addr, local_addr, helper_socket, no_enforce, dry_run } => {
-            run(paths, dns_addr, local_addr, helper_socket, no_enforce, dry_run).await
-        }
+        Command::Run { options, dry_run } => run(paths, options, dry_run).await,
         Command::Status { local_addr } => status(local_addr).await,
         Command::Release => platform::detect().release_dns(),
+        #[cfg(windows)]
+        Command::Install { local_addr } => {
+            platform::windows::service::install(paths.dir(), &local_addr.to_string())
+        }
+        #[cfg(windows)]
+        Command::Uninstall => {
+            platform::windows::service::uninstall()?;
+            platform::detect().release_dns()
+        }
+        #[cfg(windows)]
+        Command::Service { .. } => unreachable!("traité avant la boucle asynchrone"),
     }
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let paths = Paths::new(cli.state_dir);
+    #[cfg(windows)]
+    if let Command::Service { options } = cli.command {
+        return service(paths, options);
+    }
+    tracing_subscriber::fmt().with_env_filter(log_filter()).init();
+    tokio::runtime::Runtime::new()?.block_on(dispatch(paths, cli.command))
 }

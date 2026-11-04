@@ -6,36 +6,31 @@
 //! Il n'impose rien : l'agent reste seul à verrouiller et à filtrer (D3,
 //! D4), et garde ses notifications de base si l'assistant n'est pas là.
 //!
-//! Avec la feature `gtk`, deux fenêtres natives s'ajoutent : l'écran plein
-//! d'une fermeture et le formulaire de demande. Sans elle, ou sans affichage
-//! au lancement, notifications et icône suffisent.
+//! Sous Linux, avec la feature `gtk`, deux fenêtres natives s'ajoutent :
+//! l'écran plein d'une fermeture et le formulaire de demande. Sans elle,
+//! sans affichage au lancement, ou sous Windows, notifications et icône
+//! suffisent (module `desktop`).
 
-mod notify;
+mod desktop;
 mod text;
-mod tray;
-#[cfg(feature = "gtk")]
+#[cfg(all(feature = "gtk", unix))]
 mod ui;
-#[cfg(not(feature = "gtk"))]
+#[cfg(not(all(feature = "gtk", unix)))]
 #[path = "ui/stub.rs"]
 mod ui;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{Datelike, Local};
 use clap::Parser;
 use cotutelle_common::GrantTarget;
 use cotutelle_common::session::{AgentEvent, HelperMessage, Notice, Opening, SessionState};
-use notify::Notifier;
+use desktop::{Desktop, Notifier, Tray};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
-use tokio::net::unix::OwnedWriteHalf;
 use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
-use zbus::fdo::{RequestNameFlags, RequestNameReply};
 
-/// Nom pris sur le bus de session : un seul assistant par session.
-const BUS_NAME: &str = "fr.cotutelle.Session";
 const RETRY_MIN: Duration = Duration::from_secs(2);
 const RETRY_MAX: Duration = Duration::from_secs(30);
 /// Durées proposées d'un clic.
@@ -45,13 +40,13 @@ pub const ASK_SERVICE_MINUTES: u32 = 60;
 #[derive(Parser, Debug)]
 #[command(name = "cotutelle-session", version, about)]
 struct Cli {
-    /// Socket de l'agent.
-    #[arg(long, env = "COTUTELLE_HELPER_SOCKET", default_value = "/run/cotutelle/agent.sock")]
+    /// Socket (ou tube nommé) de l'agent.
+    #[arg(long, env = "COTUTELLE_HELPER_SOCKET", default_value = desktop::DEFAULT_SOCKET)]
     socket: PathBuf,
     /// Adresse locale de l'agent, qui ouvre l'espace enfant.
     #[arg(long, env = "COTUTELLE_LOCAL_ADDR", default_value = "127.0.0.1:7465")]
     local_addr: String,
-    /// Nom de l'icône de barre dans le thème.
+    /// Nom de l'icône de barre dans le thème (Linux).
     #[arg(long, default_value = "cotutelle")]
     icon: String,
     /// Dossier contenant l'icône, quand elle n'est pas installée dans le thème.
@@ -107,12 +102,12 @@ impl Command {
 struct App {
     cli: Cli,
     notifier: Notifier,
-    /// L'icône de barre, quand le bus l'a acceptée.
-    tray: Option<ksni::Handle<tray::Tray>>,
+    /// L'icône de barre, quand le bureau l'a acceptée.
+    tray: Option<Tray>,
     /// Les fenêtres natives, quand GTK a pu démarrer.
     ui: Option<ui::Ui>,
     state: Option<SessionState>,
-    writer: Option<OwnedWriteHalf>,
+    writer: Option<desktop::Writer>,
     /// Le message d'accueil n'est montré qu'une fois par session.
     welcomed: bool,
 }
@@ -137,7 +132,7 @@ impl App {
         }
         self.state = state.clone();
         if let Some(tray) = &self.tray {
-            tray.update(|tray| tray.state = state).await;
+            tray.update(state).await;
         }
     }
 
@@ -189,7 +184,7 @@ impl App {
 
     fn open_space(&self) {
         let url = format!("http://{}/", self.cli.local_addr);
-        if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
+        if let Err(e) = desktop::open_url(&url) {
             tracing::warn!(error = %e, "ouverture de l'espace enfant");
         }
     }
@@ -243,19 +238,11 @@ async fn main() -> Result<()> {
         .init();
     let cli = Cli::parse();
 
-    let bus = zbus::Connection::session().await.context("bus de session")?;
-    let owner = bus
-        .request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into())
-        .await
-        .context("nom sur le bus de session")?;
-    if owner != RequestNameReply::PrimaryOwner {
-        anyhow::bail!("un autre assistant de session tourne déjà dans cette session");
-    }
-
+    let desktop = Desktop::claim().await?;
     let (commands_tx, mut commands) = mpsc::unbounded_channel();
-    let notifier = Notifier::new(&bus, commands_tx.clone()).await?;
+    let notifier = desktop.notifier(commands_tx.clone()).await?;
     // Sans icône de barre, l'assistant sert quand même : avis et demandes.
-    let tray = match tray::spawn(commands_tx.clone(), cli.icon.clone(), cli.icon_dir.clone()).await
+    let tray = match desktop.tray(commands_tx.clone(), cli.icon.clone(), cli.icon_dir.clone()).await
     {
         Ok(tray) => Some(tray),
         Err(e) => {
@@ -269,8 +256,8 @@ async fn main() -> Result<()> {
 
     let mut delay = RETRY_MIN;
     loop {
-        let stream = match UnixStream::connect(&app.cli.socket).await {
-            Ok(stream) => stream,
+        let (reader, writer) = match desktop::connect(&app.cli.socket).await {
+            Ok(link) => link,
             Err(e) => {
                 tracing::debug!(error = %e, "agent injoignable");
                 tokio::time::sleep(delay).await;
@@ -279,7 +266,6 @@ async fn main() -> Result<()> {
             }
         };
         delay = RETRY_MIN;
-        let (reader, writer) = stream.into_split();
         app.writer = Some(writer);
         app.send(HelperMessage::Hello { version: env!("CARGO_PKG_VERSION").to_string() }).await;
         tracing::info!("connecté à l'agent");

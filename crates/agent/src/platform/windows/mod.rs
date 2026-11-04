@@ -7,6 +7,7 @@
 
 mod dns;
 mod net;
+pub(crate) mod service;
 pub(crate) mod wts;
 
 use super::{Platform, Session};

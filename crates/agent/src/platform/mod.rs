@@ -130,7 +130,17 @@ pub async fn shutdown_signal() {
     }
 }
 
-#[cfg(not(unix))]
+/// Sous Windows : Ctrl-C en console, ou l'ordre d'arrêt du gestionnaire de
+/// services.
+#[cfg(windows)]
+pub async fn shutdown_signal() {
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        () = windows::service::stopped() => {}
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 pub async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }

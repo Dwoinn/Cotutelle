@@ -85,6 +85,10 @@ windows = { version = "0.62", features = [
 ] }
 windows-registry = "0.100"
 windows-service = "0.8"
+# Assistant de session sous Windows : icône de la zone de notification et
+# son menu, notifications toast.
+tray-icon = "0.26"
+tauri-winrt-notification = "0.8"
 
 [profile.release]
 lto = "thin"
