@@ -4,18 +4,7 @@
 //! filtrant, décompte du temps d'écran, verrouillage. Sans serveur, la
 //! dernière politique connue reste appliquée (D3).
 
-#[cfg(unix)]
 mod helper;
-/// Sans socket Unix, pas d'assistant : l'agent garde ses notifications de base.
-#[cfg(not(unix))]
-mod helper {
-    pub async fn serve(
-        _: std::sync::Arc<crate::runtime::Runtime>,
-        _: &std::path::Path,
-    ) -> anyhow::Result<()> {
-        anyhow::bail!("assistant de session non pris en charge sur ce système")
-    }
-}
 mod local;
 mod platform;
 mod runtime;
@@ -38,7 +27,7 @@ use tracing_subscriber::EnvFilter;
 #[command(name = "cotutelle-agent", version, about)]
 struct Cli {
     /// Répertoire d'état : identité, politique en cache, listes, temps d'écran.
-    #[arg(long, env = "COTUTELLE_STATE_DIR", default_value = "/var/lib/cotutelle", global = true)]
+    #[arg(long, env = "COTUTELLE_STATE_DIR", default_value_os_t = platform::default_state_dir(), global = true)]
     state_dir: PathBuf,
 
     #[command(subcommand)]
@@ -59,13 +48,13 @@ enum Command {
     /// Lance l'agent (mode service).
     Run {
         /// Adresse du résolveur DNS local.
-        #[arg(long, env = "COTUTELLE_DNS_ADDR", default_value = "127.0.0.1:5354")]
+        #[arg(long, env = "COTUTELLE_DNS_ADDR", default_value = platform::DEFAULT_DNS_ADDR)]
         dns_addr: SocketAddr,
         /// Adresse du serveur HTTP local (espace enfant, état).
         #[arg(long, env = "COTUTELLE_LOCAL_ADDR", default_value = "127.0.0.1:7465")]
         local_addr: SocketAddr,
         /// Socket de liaison avec l'assistant de session (`cotutelle-session`).
-        #[arg(long, env = "COTUTELLE_HELPER_SOCKET", default_value = "/run/cotutelle/agent.sock")]
+        #[arg(long, env = "COTUTELLE_HELPER_SOCKET", default_value = platform::DEFAULT_HELPER_SOCKET)]
         helper_socket: PathBuf,
         /// Ne touche ni à systemd-resolved ni à nftables.
         #[arg(long, env = "COTUTELLE_NO_ENFORCE")]

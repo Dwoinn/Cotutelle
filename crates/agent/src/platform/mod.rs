@@ -3,13 +3,15 @@
 
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", windows)))]
 mod unsupported;
+#[cfg(windows)]
+pub(crate) mod windows;
 
 use anyhow::Result;
 use cotutelle_common::protocol::TamperKind;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Session ouverte sur l'appareil.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +55,9 @@ pub trait Platform: Send + Sync {
     /// Comptes de session « humains » présents sur l'appareil.
     fn os_accounts(&self) -> Vec<String>;
 
-    /// Nom du compte portant cet identifiant d'utilisateur.
+    /// Nom du compte portant cet identifiant d'utilisateur. Sous Windows,
+    /// l'assistant est reconnu au jeton de son processus : inutilisé.
+    #[cfg_attr(windows, allow(dead_code))]
     fn account_name(&self, uid: u32) -> Option<String>;
 
     /// Sessions interactives ouvertes (hors écran de connexion et services).
@@ -83,10 +87,34 @@ pub fn detect() -> Box<dyn Platform> {
     Box::new(linux::Linux)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+pub fn detect() -> Box<dyn Platform> {
+    Box::new(windows::Windows)
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 pub fn detect() -> Box<dyn Platform> {
     Box::new(unsupported::Unsupported)
 }
+
+/// Répertoire d'état par défaut : réservé aux administrateurs.
+pub fn default_state_dir() -> PathBuf {
+    if cfg!(windows) {
+        let program_data = std::env::var_os("ProgramData")
+            .map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from);
+        program_data.join("Cotutelle")
+    } else {
+        PathBuf::from("/var/lib/cotutelle")
+    }
+}
+
+/// Adresse du résolveur local. Le client DNS de Windows ne parle qu'au port
+/// 53 ; sous Linux, systemd-resolved accepte un autre port.
+pub const DEFAULT_DNS_ADDR: &str = if cfg!(windows) { "127.0.0.1:53" } else { "127.0.0.1:5354" };
+
+/// Liaison avec l'assistant de session : socket Unix, ou tube nommé.
+pub const DEFAULT_HELPER_SOCKET: &str =
+    if cfg!(windows) { r"\\.\pipe\cotutelle-agent" } else { "/run/cotutelle/agent.sock" };
 
 /// Attend la demande d'arrêt : Ctrl-C, ou SIGTERM qu'envoie systemd.
 #[cfg(unix)]

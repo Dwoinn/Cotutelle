@@ -183,6 +183,7 @@ mod tests {
         assert_eq!(usage.accounts().collect::<Vec<_>>(), ["louis"]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn files_are_private_and_roundtrip() {
         use std::os::unix::fs::PermissionsExt;

@@ -65,6 +65,27 @@ ksni = "0.3"
 gtk4 = "0.11"
 libadwaita = "0.9"
 
+# Windows : sessions (WTS), jeton du pair, pare-feu et registre, service.
+# Les features Win32 sont l'union de ce qu'utilisent l'agent et l'assistant.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Environment",
+    "Win32_System_Pipes",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_Threading",
+    "Win32_System_SystemInformation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_NetManagement",
+    "Win32_Networking_WinSock",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-registry = "0.100"
+windows-service = "0.8"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
