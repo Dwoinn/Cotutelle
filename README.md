@@ -42,8 +42,9 @@ cotutelle est une tutelle exercée à plusieurs.
 Cotutelle est en version 0.2.2. Le serveur, l'interface et l'agent Linux
 fonctionnent et sont couverts par des tests ; l'agent a été essayé en
 conditions réelles sur Ubuntu 24.04 (GNOME) et sur Omarchy (Arch Linux,
-Hyprland). Il n'existe pas
-encore d'agent pour Windows ni macOS. Les limites connues sont consignées dans
+Hyprland). L'agent Windows (service, assistant de session) est écrit et à
+l'essai sur une machine virtuelle Windows 11 ; il n'existe pas encore d'agent
+macOS. Les limites connues sont consignées dans
 [docs/CADRAGE.md](docs/CADRAGE.md#14-état-de-la-phase-1-et-limites-connues) ;
 avant une mise en production dans la famille, faites un premier essai sur une
 machine de test.
@@ -200,6 +201,10 @@ Toutes les versions et leurs sommes de contrôle sont sur la
 Les paquets demandent la glibc 2.28 ou plus récente (Debian 10, Ubuntu 20.04,
 RHEL 8) et un ordinateur avec systemd-resolved et nftables. Les fenêtres de
 l'assistant de session demandent GTK 4 et libadwaita.
+
+L'agent Windows (`cotutelle-agent-<version>-windows-x86_64.zip`) sera joint
+aux versions à partir de la prochaine ; voir
+[docs/INSTALLATION.md](docs/INSTALLATION.md#3-lagent-sur-un-ordinateur-windows).
 
 L'image du serveur existe pour amd64 et arm64 :
 

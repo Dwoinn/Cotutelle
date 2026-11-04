@@ -89,6 +89,7 @@ plusieurs : deux parents, plusieurs enfants, plusieurs appareils.
 | D16 | **L'agent relaie d'abord vers les DNS annoncés par le réseau**, puis vers les résolveurs configurés. Une réponse négative d'un amont fait essayer le suivant. | Seuls les DNS du réseau connaissent les noms privés : serveur Cotutelle interne, NAS, portail captif. Le filtrage ayant lieu avant le relais, ce choix ne l'affaiblit pas. |
 | D17 | **Le catalogue des services est une donnée de la famille**, distribuée aux agents avec l'état de l'appareil. Les services fournis avec Cotutelle n'en sont que le point de départ. | Un service tient sur plusieurs domaines qui changent sans prévenir : les parents doivent pouvoir compléter une liste, ou ajouter un service, sans attendre une nouvelle version. |
 | D19 | **Un assistant de session, sans privilège, montre à l'enfant ce que l'agent décide.** `cotutelle-session` tourne dans la session (autostart XDG), parle à l'agent par une socket Unix locale (`/run/cotutelle/agent.sock`, un JSON par ligne) et au bureau par D-Bus : notifications `org.freedesktop.Notifications` avec boutons, icône de barre StatusNotifierItem et son menu. Deux fenêtres natives GTK 4 / libadwaita s'y ajoutent : l'écran plein d'une fermeture (le motif, le compte à rebours avant le verrou, « Demander du temps », « Fermer »), montré dès l'ouverture de session si l'accès est déjà fermé, et le formulaire « Demander autre chose… » (un service proposé, un autre site ou du temps en plus, la durée de 5 à 120 minutes, un mot pour les parents). L'agent lui pousse la situation du compte (temps restant, horaires, ouvertures, services demandables) et ses avis (préavis à 10, 5 et 1 minute, fermeture et son motif, site bloqué, réponse des parents), en reçoit les demandes de l'enfant et les relaie au serveur (`child_request`), qui renvoie la réponse à l'appareil d'origine (`request_answered`). Sans assistant, l'agent garde ses notifications de base et verrouille aussitôt ; avec lui, il laisse 30 secondes pour lire le motif et demander du temps. | L'agent reste seul à imposer quoi que ce soit (D3, D4) ; l'assistant ne reçoit que ce qui concerne le compte qui l'a lancé (identité du pair de la socket) et ne peut rien ouvrir. Les fenêtres ne changent rien au canal : elles sont une feature `gtk` du crate, active par défaut dans les paquets Linux ; sans elle, ou sans affichage au lancement, notifications et icône suffisent et une fermeture reste une notification critique. GTK tourne sur un fil à lui, à côté de la boucle tokio. Prix : l'assistant se construit sur AlmaLinux 9 (glibc 2.34) et demande GTK 4 et libadwaita 1 à l'exécution (Debian 12+, Ubuntu 22.04+, RHEL 9+) ; l'agent, lui, garde la glibc 2.28 et protège partout. |
+| D20 | **L'agent Windows reprend le principe de l'agent Linux avec les outils de Windows**, tout derrière `Platform`. Une règle NRPT (Name Resolution Policy Table) pour l'espace de noms `.` envoie toute résolution au résolveur de l'agent, `127.0.0.1:53` (le client DNS de Windows ne parle qu'au port 53), sans toucher la configuration DHCP des cartes. Deux règles sortantes du pare-feu Windows rejettent le DNS en clair et sur TLS (ports 53 et 853) de tout compte sauf SYSTEM, qui porte l'agent, et les administrateurs ; le pare-feu ne sait pas détourner, le DNS direct est donc rejeté et non redirigé. Les politiques Firefox, Chrome, Edge et Brave désactivant leur DNS chiffré sont posées dans le registre. Les sessions viennent de WTS (`WTSEnumerateSessions`, `WTSSessionInfoEx` pour l'état verrouillé ; une session déconnectée compte comme verrouillée, l'inactivité n'est pas connue) ; le verrou est `LockWorkStation` lancé dans la session par le jeton de l'utilisateur, la déconnexion de la session en secours ; l'avis de base est une boîte de message `WTSSendMessage`. L'agent est un service `LocalSystem` enregistré par `cotutelle-agent install`, l'état vit dans `%ProgramData%\Cotutelle` réservé à SYSTEM et aux administrateurs. L'assistant de session parle à l'agent par un tube nommé, dont l'agent reconnaît le compte au jeton du processus client ; il démarre avec chaque session par la clé `Run`, montre une icône de zone de notification et des toasts, sans fenêtres natives (une fermeture reste une notification, « Demander autre chose… » ouvre l'espace enfant). | Même modèle que Linux (D1 à D4, D12, D19) : un seul code de décision, seule l'intégration change. La NRPT est le mécanisme prévu par Windows pour imposer un résolveur ; le filtrage par compte du pare-feu tient lieu de `meta skuid`. Les boîtes de message et les toasts évitent toute dépendance graphique côté agent. |
 | D18 | **Les vacances scolaires viennent du calendrier officiel** (jeu de données `fr-en-calendrier-scolaire` de data.education.gouv.fr) pour la zone choisie dans les réglages, que les parents ajustent : une période retirée, un pont ou un voyage ajouté. Les périodes effectives voyagent avec l'état de l'appareil (D14) ; une politique porte, en option, des règles de vacances (horaires, quota, filtre), et `Policy::rules_on` rend les règles d'un jour donné, partout où l'accès ou le filtre s'évalue. | Le parent ne doit pas changer les règles à la main deux fois par période. Le serveur, seul à parler au réseau, garde le calendrier en base et le rafraîchit chaque semaine ; sans zone ni période, rien ne change. Le quota hebdomadaire garde sa semaine, seul son plafond suit le jour courant : simple, sans proratisation. |
 
 ## 6. Modèle de domaine
@@ -176,7 +177,7 @@ parents non filtré.
 - L'agent conserve politique et listes sur disque, lisibles par root seul.
   Les listes sont vérifiées par somme SHA-256.
 
-### Anti-contournement (agent Linux)
+### Anti-contournement (agent Linux ; Windows : D20)
 
 - Compte enfant sans sudo, agent en service systemd root durci.
 - systemd-resolved est pointé sur le résolveur local de l'agent
@@ -288,7 +289,8 @@ compilées, types du domaine, CI, Dockerfile.
 l'activité par catégorie, agent Windows, profil DNS privé Android/iOS, listes
 additionnelles (HaGeZi, OISD), TOTP, limitation des tentatives de
 connexion, politique par utilisateur plutôt que par compte au premier plan.
-Le mode vacances, prévu ici, est réalisé (D18).
+Le mode vacances, prévu ici, est réalisé (D18) ; l'agent Windows est en
+cours d'essai (D20, §15).
 
 **Phase 3** : agent macOS, Postgres, multi-famille (hébergement partagé),
 mise à jour automatique des agents.
@@ -388,3 +390,25 @@ Limites assumées du MVP :
 - **Appareils sans agent** : reconnus à leur adresse IP, qui doit être fixe.
   Pas de décompte du temps, seulement des plages horaires.
 - **Fuseau horaire** : le serveur et les appareils sont supposés dans le même.
+
+## 15. Agent Windows : état et limites
+
+Écrit en novembre 2026 (D20), à l'essai sur une machine virtuelle Windows 11.
+Ce qui diffère de l'agent Linux, et ce qu'on assume :
+
+- **DNS direct rejeté, pas détourné** : un programme qui interroge lui-même
+  un résolveur public échoue au lieu d'être filtré. Le résolveur système,
+  lui, passe par l'agent.
+- **Inactivité inconnue** : WTS ne dit pas si quelqu'un est devant l'écran
+  ; une session ouverte et non verrouillée compte, écran éteint compris.
+  L'économiseur de Windows verrouille la session par défaut, ce qui suffit
+  dans la pratique.
+- **Pas de fenêtres natives** pour l'assistant : une fermeture est un toast
+  qui reste affiché, le formulaire de demande est l'espace enfant dans le
+  navigateur. L'identité des toasts est celle de PowerShell tant que
+  l'assistant n'est pas un paquet installé.
+- **Compte enfant standard** obligatoire : un administrateur retire le
+  service ou les règles. Les parents sont administrateurs et ne sont pas
+  soumis au pare-feu DNS, leur résolution passe de toute façon par l'agent.
+- **Paquet** : une archive zip et `cotutelle-agent install` ; un
+  installateur MSI viendra ensuite.

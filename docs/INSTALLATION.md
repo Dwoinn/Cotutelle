@@ -1,7 +1,8 @@
 # Installer Cotutelle
 
 Deux éléments : le **serveur**, une seule fois, sur une machine allumée en
-permanence ; l'**agent**, sur chaque ordinateur à protéger.
+permanence ; l'**agent**, sur chaque ordinateur à protéger (Linux ou
+Windows).
 
 ## 1. Le serveur
 
@@ -199,7 +200,49 @@ cotutelle-agent status              # état, compte au premier plan, temps resta
 journalctl -u cotutelle-agent -f    # journal
 ```
 
-## 3. Les appareils sans agent
+
+## 3. L'agent, sur un ordinateur Windows
+
+Prérequis : Windows 10 ou 11, et un compte **standard** (sans droits
+d'administration) pour l'enfant ; un administrateur peut défaire la
+protection. À l'essai sur une machine virtuelle Windows 11 : faites le
+premier essai sur une machine de test.
+
+Chaque [version publiée](https://github.com/Dwoinn/cotutelle/releases) fournit
+`cotutelle-agent-<version>-windows-x86_64.zip`. Décompressez-le dans un
+dossier réservé aux administrateurs, par exemple `C:\Program
+Files\Cotutelle`, puis dans une console PowerShell **en administrateur** :
+
+```powershell
+cd "C:\Program Files\Cotutelle"
+.\cotutelle-agent.exe install
+.\cotutelle-agent.exe enroll --server http://<adresse du serveur>:8080 --code XXXX-XXXX
+```
+
+`install` enregistre le service `cotutelle-agent` (démarrage automatique,
+compte système), réserve `C:\ProgramData\Cotutelle` aux administrateurs,
+fait démarrer l'assistant de session avec chaque session et ajoute « Mon
+temps d'écran » au menu Démarrer. L'enrôlement démarre le service ; il
+rejoue aussi `install` sans dommage à une mise à jour (remplacez les deux
+`.exe`, puis `install`).
+
+Le service pose une règle NRPT qui envoie toute résolution au résolveur de
+l'agent, deux règles de pare-feu qui rejettent le DNS direct des comptes
+ordinaires, et les politiques des navigateurs qui coupent leur DNS chiffré.
+`cotutelle-agent uninstall` retire le service et tout cela ; l'identité de
+l'appareil reste dans `C:\ProgramData\Cotutelle`.
+
+Le journal du service est `C:\ProgramData\Cotutelle\agent.log` ;
+`cotutelle-agent status` montre l'état en cours. Pour un essai sans rien
+imposer : `cotutelle-agent run --dry-run` dans une console administrateur.
+
+L'assistant de session (`cotutelle-session.exe`) met dans la zone de
+notification une icône avec le temps restant et, dans son menu, le détail et
+les demandes ; préavis, fermetures, sites bloqués et réponses des parents
+arrivent en notifications. Il n'a pas de fenêtres : « Demander autre
+chose… » ouvre l'espace enfant.
+
+## 4. Les appareils sans agent
 
 Télévision, console, tablette : déclarez-les dans **Appareils › Appareils sans
 agent** avec leur adresse IP, puis faites-les passer par le DNS du serveur.
@@ -215,7 +258,7 @@ agent** avec leur adresse IP, puis faites-les passer par le DNS du serveur.
 Un appareil du réseau qui n'est pas déclaré utilise le DNS sans filtrage ni
 journalisation.
 
-## 4. Notifications sur téléphone
+## 5. Notifications sur téléphone
 
 Les parents reçoivent les demandes des enfants et les alertes sur leur
 téléphone, et répondent à une demande d'un geste depuis la notification,
@@ -246,7 +289,7 @@ téléphone. Qui héberge son propre serveur ntfy indique son adresse au même
 endroit ; sur iPhone, un serveur personnel ne notifie que s'il relaie par
 ntfy.sh (réglage `upstream-base-url` de ntfy).
 
-## 5. Vacances scolaires
+## 6. Vacances scolaires
 
 Dans **Réglages › Vacances scolaires**, choisissez votre zone (A, B, C, Corse
 ou outre-mer) : le serveur télécharge le calendrier officiel de l'Éducation
@@ -261,7 +304,7 @@ scolaire, à ajuster dans les onglets Temps et Filtre. Les agents reçoivent
 les périodes avec la politique et changent de règles au premier jour, même
 sans serveur.
 
-## 6. Accès hors de la maison
+## 7. Accès hors de la maison
 
 N'ouvrez pas le port 8080 sur Internet. Utilisez un VPN personnel comme
 Tailscale ou WireGuard pour joindre le serveur depuis l'extérieur. Le portable
