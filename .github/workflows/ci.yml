@@ -24,6 +24,16 @@ jobs:
       - run: cargo clippy -p cotutelle-session --no-default-features --all-targets -- -D warnings
       - run: cargo test -p cotutelle-session --no-default-features
 
+  # L'agent et l'assistant de session sous Windows, sans les fenêtres GTK.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p cotutelle-agent -p cotutelle-session --no-default-features --all-targets -- -D warnings
+      - run: cargo test -p cotutelle-agent -p cotutelle-session --no-default-features
+
   web:
     runs-on: ubuntu-latest
     defaults:

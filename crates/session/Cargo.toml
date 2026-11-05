@@ -28,8 +28,15 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
-zbus.workspace = true
 futures-util.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+zbus.workspace = true
 ksni.workspace = true
 gtk4 = { workspace = true, optional = true }
 libadwaita = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+tray-icon.workspace = true
+tauri-winrt-notification.workspace = true
+windows.workspace = true

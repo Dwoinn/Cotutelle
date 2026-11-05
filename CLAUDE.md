@@ -17,6 +17,12 @@ rouvrent pas sans discussion.
 - `cotutelle-session` a ses fenêtres derrière la feature `gtk` (par défaut) :
   il faut `libgtk-4-dev` et `libadwaita-1-dev` pour compiler le workspace.
   Vérifier aussi `-p cotutelle-session --no-default-features`.
+- Cible Windows (`platform/windows`, `helper/windows`, `desktop/windows`) :
+  compilation croisée d'ici avec `cargo xwin clippy --target
+  x86_64-pc-windows-msvc -p cotutelle-agent -p cotutelle-session
+  --no-default-features --all-targets -- -D warnings` ; les essais se font
+  sur une machine virtuelle Windows 11, binaire déposé dans un dossier
+  partagé.
 
 ## Règles
 
@@ -39,4 +45,5 @@ rouvrent pas sans discussion.
 - Les types de `web/src/lib/types.ts` suivent ceux de `cotutelle-common`.
 - Avant de proposer un commit : `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets -- -D warnings`,
-  `cargo test --workspace`, et dans `web/` : `pnpm check` et `pnpm build`.
+  `cargo test --workspace`, la cible Windows ci-dessus si l'agent ou
+  l'assistant ont changé, et dans `web/` : `pnpm check` et `pnpm build`.

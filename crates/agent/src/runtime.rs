@@ -101,7 +101,11 @@ impl Runtime {
     pub fn refresh_network_dns(&self) {
         let servers = self.platform.network_dns();
         if !servers.is_empty() {
-            *self.network_dns.write().expect("verrou DNS réseau") = servers;
+            let mut known = self.network_dns.write().expect("verrou DNS réseau");
+            if *known != servers {
+                tracing::info!(servers = ?servers, "résolveurs du réseau");
+                *known = servers;
+            }
         }
     }
 

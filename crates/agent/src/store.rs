@@ -28,6 +28,17 @@ impl Paths {
         Self { dir }
     }
 
+    #[cfg(windows)]
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Journal de l'agent quand il tourne sans console (service Windows).
+    #[cfg(windows)]
+    pub fn log_path(&self) -> PathBuf {
+        self.dir.join("agent.log")
+    }
+
     fn identity(&self) -> PathBuf {
         self.dir.join("agent.json")
     }
@@ -98,6 +109,33 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e).with_context(|| format!("lecture de {}", path.display())),
     }
+}
+
+/// Au-delà, le journal est mis de côté (une seule génération conservée).
+#[cfg(windows)]
+const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Ouvre le journal en ajout, après l'avoir mis de côté s'il est trop gros.
+#[cfg(windows)]
+pub fn open_log(path: PathBuf) -> Result<std::fs::File> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > LOG_ROTATE_BYTES) {
+        let _ = std::fs::rename(&path, path.with_extension("log.1"));
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .with_context(|| format!("ouverture de {}", path.display()))?;
+    // Marque d'ordre d'octets : sans elle, `Get-Content` lit le journal en
+    // page de code ANSI et les accents sont illisibles.
+    if file.metadata()?.len() == 0 {
+        use std::io::Write;
+        file.write_all("\u{FEFF}".as_bytes())?;
+    }
+    Ok(file)
 }
 
 /// Écrit de façon atomique un fichier réservé à son propriétaire.
@@ -183,6 +221,7 @@ mod tests {
         assert_eq!(usage.accounts().collect::<Vec<_>>(), ["louis"]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn files_are_private_and_roundtrip() {
         use std::os::unix::fs::PermissionsExt;
