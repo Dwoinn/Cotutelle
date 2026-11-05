@@ -18,6 +18,8 @@ use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{PCWSTR, w};
 
 pub const DEFAULT_SOCKET: &str = r"\\.\pipe\cotutelle-agent";
+/// Au-delà, le journal est mis de côté (une seule génération conservée).
+const LOG_ROTATE_BYTES: u64 = 1024 * 1024;
 /// Un seul assistant par session : le mutex est local à la session.
 const INSTANCE_MUTEX: PCWSTR = w!("Local\\CotutelleSession");
 
@@ -103,6 +105,25 @@ pub async fn connect(path: &Path) -> std::io::Result<(Reader, Writer)> {
     };
     let (reader, writer) = tokio::io::split(pipe);
     Ok((Box::new(reader), Box::new(writer)))
+}
+
+/// Journal de l'assistant, dans le profil de l'utilisateur :
+/// `%LOCALAPPDATA%\Cotutelle\session.log`, mis de côté quand il grossit.
+pub fn open_log() -> Result<std::fs::File> {
+    use std::io::Write;
+    let base = std::env::var_os("LOCALAPPDATA").context("LOCALAPPDATA")?;
+    let dir = std::path::PathBuf::from(base).join("Cotutelle");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("session.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > LOG_ROTATE_BYTES) {
+        let _ = std::fs::rename(&path, path.with_extension("log.1"));
+    }
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+    // Marque d'ordre d'octets, pour que `Get-Content` lise bien l'UTF-8.
+    if file.metadata()?.len() == 0 {
+        file.write_all("\u{FEFF}".as_bytes())?;
+    }
+    Ok(file)
 }
 
 /// Ouvre une adresse dans le navigateur de la session.

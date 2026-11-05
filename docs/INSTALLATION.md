@@ -240,7 +240,8 @@ L'assistant de session (`cotutelle-session.exe`) met dans la zone de
 notification une icône avec le temps restant et, dans son menu, le détail et
 les demandes ; préavis, fermetures, sites bloqués et réponses des parents
 arrivent en notifications. Il n'a pas de fenêtres : « Demander autre
-chose… » ouvre l'espace enfant.
+chose… » ouvre l'espace enfant. Son journal est
+`%LOCALAPPDATA%\Cotutelle\session.log` dans le profil de l'enfant.
 
 ## 4. Les appareils sans agent
 

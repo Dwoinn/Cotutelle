@@ -11,6 +11,10 @@
 //! sans affichage au lancement, ou sous Windows, notifications et icône
 //! suffisent (module `desktop`).
 
+// Sous Windows, pas de console : lancé à l'ouverture de session, il ne
+// doit pas ouvrir de fenêtre ; son journal va dans un fichier.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod desktop;
 mod text;
 #[cfg(all(feature = "gtk", unix))]
@@ -228,14 +232,34 @@ impl App {
     }
 }
 
+fn log_filter() -> EnvFilter {
+    // zbus avertit qu'aucun objet n'est servi derrière le nom : c'est voulu.
+    EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,zbus=error".into())
+}
+
+#[cfg(unix)]
+fn init_logging() {
+    tracing_subscriber::fmt().with_env_filter(log_filter()).init();
+}
+
+/// Sans console, le journal va dans le profil de l'utilisateur et les
+/// paniques y sont consignées aussi.
+#[cfg(windows)]
+fn init_logging() {
+    match desktop::open_log() {
+        Ok(log) => tracing_subscriber::fmt()
+            .with_env_filter(log_filter())
+            .with_ansi(false)
+            .with_writer(std::sync::Arc::new(log))
+            .init(),
+        Err(_) => tracing_subscriber::fmt().with_env_filter(log_filter()).with_ansi(false).init(),
+    }
+    std::panic::set_hook(Box::new(|info| tracing::error!(%info, "panique")));
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        // zbus avertit qu'aucun objet n'est servi derrière le nom : c'est voulu.
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,zbus=error".into()),
-        )
-        .init();
+    init_logging();
     let cli = Cli::parse();
 
     let desktop = Desktop::claim().await?;

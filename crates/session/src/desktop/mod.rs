@@ -11,7 +11,7 @@ mod windows;
 #[cfg(unix)]
 pub use unix::{DEFAULT_SOCKET, Desktop, Notifier, Tray, connect, open_url};
 #[cfg(windows)]
-pub use windows::{DEFAULT_SOCKET, Desktop, Notifier, Tray, connect, open_url};
+pub use windows::{DEFAULT_SOCKET, Desktop, Notifier, Tray, connect, open_log, open_url};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
