@@ -124,11 +124,18 @@ pub fn open_log(path: PathBuf) -> Result<std::fs::File> {
     if std::fs::metadata(&path).is_ok_and(|m| m.len() > LOG_ROTATE_BYTES) {
         let _ = std::fs::rename(&path, path.with_extension("log.1"));
     }
-    std::fs::OpenOptions::new()
+    let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
-        .with_context(|| format!("ouverture de {}", path.display()))
+        .with_context(|| format!("ouverture de {}", path.display()))?;
+    // Marque d'ordre d'octets : sans elle, `Get-Content` lit le journal en
+    // page de code ANSI et les accents sont illisibles.
+    if file.metadata()?.len() == 0 {
+        use std::io::Write;
+        file.write_all("\u{FEFF}".as_bytes())?;
+    }
+    Ok(file)
 }
 
 /// Écrit de façon atomique un fichier réservé à son propriétaire.
