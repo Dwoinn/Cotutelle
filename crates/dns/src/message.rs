@@ -40,7 +40,7 @@ fn reply_to(packet: &[u8], code: ResponseCode) -> Option<Message> {
     Some(reply)
 }
 
-pub(crate) fn servfail(packet: &[u8]) -> Option<Vec<u8>> {
+pub fn servfail(packet: &[u8]) -> Option<Vec<u8>> {
     reply_to(packet, ResponseCode::ServFail)?.to_bytes().ok()
 }
 

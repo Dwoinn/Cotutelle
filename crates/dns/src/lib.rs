@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::task::JoinSet;
 use tokio::time::timeout;
 
 /// TTL maximal renvoyé aux clients, en secondes.
@@ -23,6 +24,8 @@ pub const MAX_TTL: u32 = 30;
 pub const BLOCK_TTL: u32 = 10;
 
 const UDP_TIMEOUT: Duration = Duration::from_secs(2);
+/// Délai avant de solliciter l'amont suivant quand le précédent se tait.
+const STAGGER: Duration = Duration::from_millis(300);
 const TCP_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_UDP_PACKET: usize = 4096;
 
@@ -190,27 +193,43 @@ fn is_negative(reply: &[u8]) -> bool {
     reply.len() >= 4 && matches!(reply[3] & 0x0f, 2 | 3 | 5)
 }
 
-/// Interroge les amonts dans l'ordre. Une réponse négative n'arrête pas la
+/// Interroge les amonts en cascade : chacun est sollicité un peu après le
+/// précédent s'il n'a pas encore répondu, pour qu'un résolveur muet (une
+/// passerelle qui ne relaie pas, un DNS d'une autre interface) ne coûte que
+/// ce décalage et non tout son délai. Une réponse négative n'arrête pas la
 /// recherche : un nom privé n'est connu que du DNS du réseau local, un nom
 /// public parfois seulement d'un résolveur public. La première réponse
-/// positive l'emporte ; à défaut, la première réponse négative est rendue.
+/// positive l'emporte ; à défaut, la négative de l'amont le plus prioritaire.
 async fn forward(packet: &[u8], tcp: bool, upstreams: &[SocketAddr]) -> Result<Vec<u8>> {
-    let mut negative = None;
+    let mut attempts = JoinSet::new();
+    for (rank, upstream) in upstreams.iter().copied().enumerate() {
+        let packet = packet.to_vec();
+        attempts.spawn(async move {
+            tokio::time::sleep(STAGGER * rank as u32).await;
+            let attempt = if tcp {
+                forward_tcp(&packet, upstream).await
+            } else {
+                forward_udp(&packet, upstream).await
+            };
+            (rank, attempt)
+        });
+    }
+    let mut negative: Option<(usize, Vec<u8>)> = None;
     let mut last_error = None;
-    for upstream in upstreams {
-        let attempt = if tcp {
-            forward_tcp(packet, *upstream).await
-        } else {
-            forward_udp(packet, *upstream).await
-        };
+    while let Some(joined) = attempts.join_next().await {
+        let Ok((rank, attempt)) = joined else { continue };
         match attempt {
-            Ok(reply) if is_negative(&reply) => negative = negative.or(Some(reply)),
+            Ok(reply) if is_negative(&reply) => {
+                if negative.as_ref().is_none_or(|(best, _)| rank < *best) {
+                    negative = Some((rank, reply));
+                }
+            }
             Ok(reply) => return Ok(reply),
             Err(e) => last_error = Some(e),
         }
     }
     match (negative, last_error) {
-        (Some(reply), _) => Ok(reply),
+        (Some((_, reply)), _) => Ok(reply),
         (None, Some(e)) => Err(e),
         (None, None) => bail!("aucun résolveur amont configuré"),
     }
