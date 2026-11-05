@@ -7,7 +7,7 @@
 
 use crate::Command;
 use cotutelle_common::session::{Notice, SessionState};
-use tauri_winrt_notification::{Duration, Scenario, Toast};
+use tauri_winrt_notification::{Duration, Toast};
 use tokio::sync::mpsc;
 
 pub struct Notifier {
@@ -20,14 +20,13 @@ impl Notifier {
     }
 
     fn toast(&self, title: &str, body: &str, button: Option<(String, &str)>, urgent: bool) {
+        // Un avis pressant reste plus longtemps, mais s'efface de lui-même :
+        // un toast « rappel » resterait après le verrou et cacherait les
+        // suivants ; tous se retrouvent dans le centre de notifications.
         let mut toast = Toast::new(Toast::POWERSHELL_APP_ID)
             .title(title)
             .text1(body)
             .duration(if urgent { Duration::Long } else { Duration::Short });
-        if urgent {
-            // Reste à l'écran jusqu'à ce que l'enfant le ferme.
-            toast = toast.scenario(Scenario::Reminder);
-        }
         if let Some((key, label)) = button {
             toast = toast.add_button(label, &key);
         }

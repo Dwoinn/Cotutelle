@@ -411,8 +411,8 @@ diffère de l'agent Linux, et ce qu'on assume :
   L'économiseur de Windows verrouille la session par défaut, ce qui suffit
   dans la pratique.
 - **Pas de fenêtres natives** pour l'assistant : une fermeture est un toast
-  qui reste affiché, le formulaire de demande est l'espace enfant dans le
-  navigateur. L'identité des toasts est celle de PowerShell tant que
+  de longue durée, repris dans le centre de notifications, le formulaire de
+  demande est l'espace enfant dans le navigateur. L'identité des toasts est celle de PowerShell tant que
   l'assistant n'est pas un paquet installé, et Windows replie l'icône
   derrière le chevron de la barre jusqu'à ce qu'on l'en sorte.
 - **Sessions de bureau à distance comptées** comme les sessions locales :
