@@ -205,8 +205,9 @@ journalctl -u cotutelle-agent -f    # journal
 
 Prérequis : Windows 10 ou 11, et un compte **standard** (sans droits
 d'administration) pour l'enfant ; un administrateur peut défaire la
-protection. À l'essai sur une machine virtuelle Windows 11 : faites le
-premier essai sur une machine de test.
+protection. Essayé sur une machine virtuelle Windows, en session locale et
+en bureau à distance ; faites tout de même le premier essai sur une machine
+de test.
 
 Chaque [version publiée](https://github.com/Dwoinn/cotutelle/releases) fournit
 `cotutelle-agent-<version>-windows-x86_64.zip`. Décompressez-le dans un
@@ -235,12 +236,19 @@ l'appareil reste dans `C:\ProgramData\Cotutelle`.
 Le journal du service est `C:\ProgramData\Cotutelle\agent.log` ;
 `cotutelle-agent status` montre l'état en cours. Pour un essai sans rien
 imposer : `cotutelle-agent run --dry-run` dans une console administrateur.
+Pour vérifier le filtrage, `Resolve-DnsName` passe par le client DNS de
+Windows et donc par l'agent ; `nslookup`, lui, interroge directement le DNS
+de la carte réseau et ne dit rien de la règle NRPT. Les administrateurs ne
+sont pas soumis au pare-feu DNS : vérifiez depuis le compte de l'enfant.
 
 L'assistant de session (`cotutelle-session.exe`) met dans la zone de
 notification une icône avec le temps restant et, dans son menu, le détail et
 les demandes ; préavis, fermetures, sites bloqués et réponses des parents
 arrivent en notifications. Il n'a pas de fenêtres : « Demander autre
-chose… » ouvre l'espace enfant. Son journal est
+chose… » ouvre l'espace enfant. Windows range toute nouvelle icône derrière
+le chevron « ^ » de la barre : glissez-la une fois vers la barre pour la
+garder visible. Les notifications portent l'en-tête « Windows PowerShell »
+tant que l'assistant n'est pas un paquet installé. Son journal est
 `%LOCALAPPDATA%\Cotutelle\session.log` dans le profil de l'enfant.
 
 ## 4. Les appareils sans agent

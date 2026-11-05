@@ -393,8 +393,15 @@ Limites assumées du MVP :
 
 ## 15. Agent Windows : état et limites
 
-Écrit en novembre 2026 (D20), à l'essai sur une machine virtuelle Windows 11.
-Ce qui diffère de l'agent Linux, et ce qu'on assume :
+Écrit en novembre 2026 (D20). **Essai réel du 5 novembre 2026** sur une
+machine virtuelle Windows, agent en service et compte enfant standard :
+règle NRPT et règles de pare-feu acceptées telles quelles, site bloqué
+résolu en `0.0.0.0` chez l'enfant et DNS direct rejeté, politiques Edge
+posées, verrou de la session par `LockWorkStation` depuis le service (y
+compris d'une session de bureau à distance), assistant lancé par la clé
+`Run` avec icône, infobulle, menu, demande et réponse en toasts, fermeture
+par une pause des parents suivie du verrou trente secondes plus tard. Ce qui
+diffère de l'agent Linux, et ce qu'on assume :
 
 - **DNS direct rejeté, pas détourné** : un programme qui interroge lui-même
   un résolveur public échoue au lieu d'être filtré. Le résolveur système,
@@ -406,7 +413,10 @@ Ce qui diffère de l'agent Linux, et ce qu'on assume :
 - **Pas de fenêtres natives** pour l'assistant : une fermeture est un toast
   qui reste affiché, le formulaire de demande est l'espace enfant dans le
   navigateur. L'identité des toasts est celle de PowerShell tant que
-  l'assistant n'est pas un paquet installé.
+  l'assistant n'est pas un paquet installé, et Windows replie l'icône
+  derrière le chevron de la barre jusqu'à ce qu'on l'en sorte.
+- **Sessions de bureau à distance comptées** comme les sessions locales :
+  l'enfant pourrait s'y connecter depuis une tablette.
 - **Compte enfant standard** obligatoire : un administrateur retire le
   service ou les règles. Les parents sont administrateurs et ne sont pas
   soumis au pare-feu DNS, leur résolution passe de toute façon par l'agent.

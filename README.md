@@ -42,9 +42,9 @@ cotutelle est une tutelle exercée à plusieurs.
 Cotutelle est en version 0.2.2. Le serveur, l'interface et l'agent Linux
 fonctionnent et sont couverts par des tests ; l'agent a été essayé en
 conditions réelles sur Ubuntu 24.04 (GNOME) et sur Omarchy (Arch Linux,
-Hyprland). L'agent Windows (service, assistant de session) est écrit et à
-l'essai sur une machine virtuelle Windows 11 ; il n'existe pas encore d'agent
-macOS. Les limites connues sont consignées dans
+Hyprland). L'agent Windows (service, assistant de session) a passé ses
+essais sur une machine virtuelle Windows : filtrage, verrou, demandes et
+notifications ; il n'existe pas encore d'agent macOS. Les limites connues sont consignées dans
 [docs/CADRAGE.md](docs/CADRAGE.md#14-état-de-la-phase-1-et-limites-connues) ;
 avant une mise en production dans la famille, faites un premier essai sur une
 machine de test.
