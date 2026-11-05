@@ -39,7 +39,7 @@ cotutelle est une tutelle exercée à plusieurs.
 
 ### État du projet
 
-Cotutelle est en version 0.2.2. Le serveur, l'interface et l'agent Linux
+Cotutelle est en version 0.3.0. Le serveur, l'interface et l'agent Linux
 fonctionnent et sont couverts par des tests ; l'agent a été essayé en
 conditions réelles sur Ubuntu 24.04 (GNOME) et sur Omarchy (Arch Linux,
 Hyprland). L'agent Windows (service, assistant de session) a passé ses
@@ -178,7 +178,7 @@ ajoutez vos enfants.
 l'ordinateur :
 
 ```bash
-sudo apt install ./cotutelle-agent_0.2.2_amd64.deb
+sudo apt install ./cotutelle-agent_0.3.0_amd64.deb
 sudo cotutelle-agent enroll --server http://<adresse du serveur>:8080 --code XXXX-XXXX
 sudo systemctl enable --now cotutelle-agent
 ```
@@ -192,24 +192,28 @@ filtrés ».
 Toutes les versions et leurs sommes de contrôle sont sur la
 [page des versions](https://github.com/Dwoinn/cotutelle/releases).
 
-| Agent Linux 0.2.2 | x86_64 | aarch64 |
+| Agent Linux 0.3.0 | x86_64 | aarch64 |
 |-------------------|--------|---------|
-| Debian, Ubuntu | [.deb](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent_0.2.2_amd64.deb) | [.deb](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent_0.2.2_arm64.deb) |
-| Fedora, RHEL, openSUSE | [.rpm](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent-0.2.2-1.x86_64.rpm) | [.rpm](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent-0.2.2-1.aarch64.rpm) |
-| Autres distributions | [.tar.gz](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent-0.2.2-linux-x86_64.tar.gz) | [.tar.gz](https://github.com/Dwoinn/cotutelle/releases/download/v0.2.2/cotutelle-agent-0.2.2-linux-aarch64.tar.gz) |
+| Debian, Ubuntu | [.deb](https://github.com/Dwoinn/cotutelle/releases/download/v0.3.0/cotutelle-agent_0.3.0_amd64.deb) | [.deb](https://github.com/Dwoinn/cotutelle/releases/download/v0.3.0/cotutelle-agent_0.3.0_arm64.deb) |
+| Fedora, RHEL, openSUSE | [.rpm](https://github.com/Dwoinn/cotutelle/releases/download/v0.3.0/cotutelle-agent-0.3.0-1.x86_64.rpm) | [.rpm](https://github.com/Dwoinn/cotutelle/releases/download/v0.3.0/cotutelle-agent-0.3.0-1.aarch64.rpm) |
+| Autres distributions | [.tar.gz](https://github.com/Dwoinn/cotutelle/releases/download/v0.3.0/cotutelle-agent-0.3.0-linux-x86_64.tar.gz) | [.tar.gz](https://github.com/Dwoinn/cotutelle/releases/download/v0.3.0/cotutelle-agent-0.3.0-linux-aarch64.tar.gz) |
 
 Les paquets demandent la glibc 2.28 ou plus récente (Debian 10, Ubuntu 20.04,
 RHEL 8) et un ordinateur avec systemd-resolved et nftables. Les fenêtres de
 l'assistant de session demandent GTK 4 et libadwaita.
 
-L'agent Windows (`cotutelle-agent-<version>-windows-x86_64.zip`) sera joint
-aux versions à partir de la prochaine ; voir
+| Agent Windows 0.3.0 | x86_64 |
+|---------------------|--------|
+| Windows 10 et 11 | [.zip](https://github.com/Dwoinn/cotutelle/releases/download/v0.3.0/cotutelle-agent-0.3.0-windows-x86_64.zip) |
+
+L'archive contient l'agent et l'assistant de session ; installation par
+`cotutelle-agent install`, voir
 [docs/INSTALLATION.md](docs/INSTALLATION.md#3-lagent-sur-un-ordinateur-windows).
 
 L'image du serveur existe pour amd64 et arm64 :
 
 ```bash
-docker pull ghcr.io/dwoinn/cotutelle-server:0.2.2
+docker pull ghcr.io/dwoinn/cotutelle-server:0.3.0
 ```
 
 ## Développement
