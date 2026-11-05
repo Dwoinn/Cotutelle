@@ -278,6 +278,7 @@ fn main() -> Result<()> {
     if let Command::Service { options } = cli.command {
         return service(paths, options);
     }
-    tracing_subscriber::fmt().with_env_filter(log_filter()).init();
+    // La console classique de Windows n'interprète pas les codes couleur.
+    tracing_subscriber::fmt().with_env_filter(log_filter()).with_ansi(!cfg!(windows)).init();
     tokio::runtime::Runtime::new()?.block_on(dispatch(paths, cli.command))
 }

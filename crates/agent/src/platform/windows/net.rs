@@ -80,10 +80,18 @@ fn parse_sockaddr(raw: &[u8]) -> Option<IpAddr> {
 
 /// Une adresse de résolveur utilisable telle quelle : ni boucle locale, ni
 /// portée lien (qui demanderait l'interface).
+/// Un résolveur joignable tel quel : ni la boucle locale (l'agent
+/// lui-même), ni une adresse de lien (il faudrait la carte), ni les trois
+/// adresses de site `fec0:0:0:ffff::1` à `::3` que Windows inscrit par
+/// défaut sur toute carte IPv6 et que personne n'écoute.
 fn usable(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => !v4.is_loopback(),
-        IpAddr::V6(v6) => !v6.is_loopback() && !v6.is_unicast_link_local(),
+        IpAddr::V6(v6) => {
+            !v6.is_loopback()
+                && !v6.is_unicast_link_local()
+                && (v6.segments()[0] & 0xffc0) != 0xfec0
+        }
     }
 }
 
@@ -167,7 +175,9 @@ mod tests {
         assert_eq!(ip, "fe80::1".parse::<IpAddr>().unwrap());
         assert!(!usable(ip), "une adresse de portée lien n'est pas utilisable seule");
         assert!(!usable("127.0.0.1".parse().unwrap()));
+        assert!(!usable("fec0:0:0:ffff::1".parse().unwrap()), "adresse de site par défaut");
         assert!(usable("9.9.9.9".parse().unwrap()));
+        assert!(usable("2620:fe::fe".parse().unwrap()));
         assert_eq!(parse_sockaddr(&[17, 0]), None);
     }
 }

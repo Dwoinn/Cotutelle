@@ -46,14 +46,12 @@ fn info_ex(session_id: u32) -> Option<WTSINFOEX_LEVEL1_W> {
 }
 
 /// Une session WTS telle que l'agent la considère, ou `None` si elle ne
-/// compte pas : écran de connexion, services, bureau à distance.
+/// compte pas : écran de connexion, services. Une session de bureau à
+/// distance compte comme une session locale : l'enfant pourrait s'y
+/// connecter depuis une tablette, et c'est ainsi qu'on essaie l'agent.
 fn session_from_info(id: u32, state_known: bool, info: &WTSINFOEX_LEVEL1_W) -> Option<Session> {
     let user = from_wide(&info.UserName);
     if user.is_empty() {
-        return None;
-    }
-    // Une session de bureau à distance n'a ni écran ni clavier locaux.
-    if from_wide(&info.WinStationName).to_ascii_uppercase().starts_with("RDP-") {
         return None;
     }
     let active = state_known && info.SessionState == WTSActive;
@@ -290,10 +288,11 @@ mod tests {
     }
 
     #[test]
-    fn logon_screen_services_and_remote_desktop_are_ignored() {
+    fn logon_screen_is_ignored_but_remote_desktop_counts() {
         let logon = info("", "Console", WTSConnected.0, WTS_SESSIONSTATE_UNLOCK);
         let rdp = info("louis", "RDP-Tcp#0", WTSActive.0, WTS_SESSIONSTATE_UNLOCK);
         assert!(session_from_info(1, true, &logon).is_none());
-        assert!(session_from_info(4, true, &rdp).is_none());
+        let rdp = session_from_info(4, true, &rdp).unwrap();
+        assert!(rdp.active && !rdp.locked && rdp.in_use());
     }
 }
